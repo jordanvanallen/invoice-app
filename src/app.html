@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%sveltekit.assets%/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Invoice</title>
+    <script>
+      // Apply saved theme/text-size before first paint (default: dark). No flash.
+      try {
+        var t = localStorage.getItem('invoice.theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', t);
+        var s = localStorage.getItem('invoice.textSize');
+        if (s && s !== 'normal') document.documentElement.setAttribute('data-text-size', s);
+      } catch (e) {}
+    </script>
+    %sveltekit.head%
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>

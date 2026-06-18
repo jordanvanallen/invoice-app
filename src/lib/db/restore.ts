@@ -1,0 +1,73 @@
+import type { Db } from './db';
+import { MIGRATIONS } from './schema';
+
+/** Highest schema version this build knows how to open. */
+export const LATEST_SCHEMA_VERSION = Math.max(...MIGRATIONS.map((m) => m.version));
+
+/** Tables that must be present for a file to count as an Invoice Maker database. */
+export const REQUIRED_TABLES = [
+  'settings', 'clients', 'locations', 'year_counters', 'invoices', 'line_items',
+] as const;
+
+export interface BackupSummary {
+  businessName: string;
+  invoiceCount: number; // finalized invoices
+  latestInvoiceDate: string | null;
+}
+
+export interface BackupCheck {
+  ok: boolean;
+  reason?: string;
+  summary?: BackupSummary;
+}
+
+/**
+ * Validate that `db` (a candidate backup opened in its own connection) is an
+ * intact, app-appropriate Invoice Maker database. Read-only — never mutates.
+ * Returns a friendly reason on failure and a content summary on success so the
+ * user can confirm it's the right backup before anything is replaced.
+ */
+export async function validateBackup(db: Db): Promise<BackupCheck> {
+  // 1) Intact SQLite file (catches corruption, truncation, non-database files).
+  let integ: { integrity_check: string }[];
+  try {
+    integ = await db.select<{ integrity_check: string }>('PRAGMA integrity_check');
+  } catch {
+    return { ok: false, reason: 'This file is not a readable database.' };
+  }
+  if (integ[0]?.integrity_check !== 'ok') {
+    return { ok: false, reason: 'This database is corrupted, so it cannot be restored.' };
+  }
+
+  // 2) It's actually THIS app's database (rejects some other app's .db).
+  let tables: { name: string }[];
+  try {
+    tables = await db.select<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'");
+  } catch {
+    return { ok: false, reason: 'This file is not a readable database.' };
+  }
+  const names = new Set(tables.map((t) => t.name));
+  if (REQUIRED_TABLES.some((t) => !names.has(t))) {
+    return { ok: false, reason: "This doesn't look like an Invoice Maker backup — it's missing expected data." };
+  }
+
+  // 3) A schema version this build understands (never import a newer schema).
+  const verRows = await db.select<{ user_version: number }>('PRAGMA user_version');
+  const schemaVersion = verRows[0]?.user_version ?? 0;
+  if (schemaVersion > LATEST_SCHEMA_VERSION) {
+    return { ok: false, reason: 'This backup is from a newer version of the app. Update Invoice Maker first, then restore.' };
+  }
+
+  // Content summary for the user to eyeball before committing.
+  const set = await db.select<{ name: string }>('SELECT inspector_name AS name FROM settings WHERE id = 1');
+  const cnt = await db.select<{ c: number }>("SELECT COUNT(*) AS c FROM invoices WHERE status = 'finalized'");
+  const latest = await db.select<{ d: string | null }>("SELECT MAX(issue_date) AS d FROM invoices WHERE status = 'finalized'");
+  return {
+    ok: true,
+    summary: {
+      businessName: set[0]?.name?.trim() || '(no business name set)',
+      invoiceCount: cnt[0]?.c ?? 0,
+      latestInvoiceDate: latest[0]?.d ?? null,
+    },
+  };
+}

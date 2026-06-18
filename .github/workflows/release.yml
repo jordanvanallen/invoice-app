@@ -1,0 +1,51 @@
+name: Release
+
+# Push a version tag (e.g. v0.1.0) to build, sign, and publish a release
+# that the installed app auto-updates from.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Separate steps (not one multi-line block): on the windows-latest pwsh
+      # shell a multi-line run wouldn't abort on the first failure, so a failed
+      # check could be masked by a later passing command. One command per step
+      # makes GitHub gate on each exit code independently.
+      - name: Type-check (svelte-check)
+        run: npm run check
+
+      - name: Unit tests (Vitest)
+        run: npm test
+
+      - name: Build, sign, and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # Key was generated with no password — keep this empty.
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        with:
+          projectPath: .
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Invoice Maker ${{ github.ref_name }}'
+          releaseBody: 'Automated build. The app will offer this update automatically.'
+          releaseDraft: false
+          prerelease: false
