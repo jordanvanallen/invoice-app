@@ -9,7 +9,7 @@
   import { getTheme, applyTheme, getTextSize, applyTextSize, type Theme, type TextSize } from '$lib/ui/theme';
   import { getInvoiceFolder, setInvoiceFolder } from '$lib/stores/prefs';
   import { openPdfPath } from '$lib/pdf/generate';
-  import { checkForUpdate, installAndRestart } from '$lib/updater';
+  import { checkForUpdate, formatUpdateCheckMessage, installAndRestart } from '$lib/updater';
   import { open } from '@tauri-apps/plugin-dialog';
   import { getVersion } from '@tauri-apps/api/app';
   import type { Settings } from '$lib/types';
@@ -37,10 +37,10 @@
   let updateMsg = $state('');
   async function checkUpdates() {
     updateMsg = 'Checking…';
-    const u = await checkForUpdate();
-    if (!u) { updateMsg = "You're on the latest version."; return; }
-    updateMsg = `Installing version ${u.version}…`;
-    try { await installAndRestart(u); } catch (e) { updateMsg = `Update failed: ${(e as Error).message}`; }
+    const result = await checkForUpdate();
+    updateMsg = formatUpdateCheckMessage(result);
+    if (result.status !== 'available') return;
+    try { await installAndRestart(result.update); } catch (e) { updateMsg = `Update failed: ${(e as Error).message}`; }
   }
   async function openInvoiceFolder() {
     const { downloadDir } = await import('@tauri-apps/api/path');

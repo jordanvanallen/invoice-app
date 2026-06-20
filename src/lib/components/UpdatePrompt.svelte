@@ -8,7 +8,8 @@
   let err = $state('');
 
   onMount(async () => {
-    update = await checkForUpdate();
+    const result = await checkForUpdate();
+    update = result.status === 'available' ? result.update : null;
   });
 
   async function install() {

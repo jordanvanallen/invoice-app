@@ -22,6 +22,7 @@
   import { formatDollars } from '$lib/money';
   import { bpToPercentInput } from '$lib/ui/format';
   import { createAutosaveController, type AutosaveController } from '$lib/ui/autosave';
+  import { handleWindowCloseRequest } from '$lib/ui/windowClose';
   import type { Settings, DraftInvoice, FinalizedSnapshot } from '$lib/types';
   import type { CatalogEntry } from '$lib/db/catalog-repo';
   import { toEditorRow, type EditorRow } from '$lib/ui/editorRow';
@@ -112,11 +113,16 @@
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       const w = getCurrentWindow();
       unlisten = await w.onCloseRequested(async (event) => {
-        event.preventDefault();
-        try {
-          if (invoiceId !== null) await saveDraft(await getDb(), invoiceId, buildDraft());
-        } catch { /* best effort */ }
-        await w.destroy();
+        await handleWindowCloseRequest(event, {
+          save: async () => {
+            if (invoiceId !== null) await saveDraft(await getDb(), invoiceId, buildDraft());
+          },
+          destroy: () => w.destroy(),
+          exit: async (code) => {
+            const { exit } = await import('@tauri-apps/plugin-process');
+            await exit(code);
+          },
+        });
       });
     } catch { /* not in Tauri */ }
   });
