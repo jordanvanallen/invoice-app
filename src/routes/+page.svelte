@@ -21,6 +21,7 @@
   import { missingFinalizeFields, findDuplicates } from '$lib/validation';
   import { formatDollars } from '$lib/money';
   import { bpToPercentInput } from '$lib/ui/format';
+  import { createAutosaveController, type AutosaveController } from '$lib/ui/autosave';
   import type { Settings, DraftInvoice, FinalizedSnapshot } from '$lib/types';
   import type { CatalogEntry } from '$lib/db/catalog-repo';
   import { toEditorRow, type EditorRow } from '$lib/ui/editorRow';
@@ -44,7 +45,7 @@
   let noshow = $state<EditorRow[]>([]);
 
   let unlisten: (() => void) | null = null;
-  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let autosave: AutosaveController | null = null;
   let lastSavedJson = '';
 
   function buildDraft(): DraftInvoice {
@@ -61,6 +62,24 @@
         mileageCents: l.mileageCents, feeCents: l.feeCents,
       })),
     };
+  }
+
+  function makeAutosave() {
+    autosave?.dispose();
+    autosave = createAutosaveController({
+      read: buildDraft,
+      serialize: JSON.stringify,
+      isSaved: (json) => json === lastSavedJson,
+      markSaved: (json) => { lastSavedJson = json; },
+      save: async (draft) => {
+        if (invoiceId === null) throw new Error('No draft invoice is open.');
+        await saveDraft(await getDb(), invoiceId, draft);
+      },
+      setState: (state) => { saveState = state; },
+      onSaved: () => {
+        savedAt = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      },
+    });
   }
 
   onMount(async () => {
@@ -85,6 +104,7 @@
     completed = draft.lines.filter((l) => l.type === 'completed').map(toEditorRow);
     noshow = draft.lines.filter((l) => l.type === 'noshow').map(toEditorRow);
     lastSavedJson = JSON.stringify(buildDraft());
+    makeAutosave();
     loaded = true;
 
     // Flush on window close (best-effort, silent — no "unsaved changes" prompt).
@@ -103,7 +123,7 @@
 
   onDestroy(() => {
     unlisten?.();
-    if (saveTimer) clearTimeout(saveTimer);
+    autosave?.dispose();
   });
 
   // Debounced autosave: persists 1.5s after a real change. Skips save-on-load and
@@ -113,18 +133,7 @@
     const json = JSON.stringify(draft);
     if (!loaded || invoiceId === null || finalized) return;
     if (json === lastSavedJson) return;
-    if (saveTimer) clearTimeout(saveTimer);
-    saveState = 'saving';
-    saveTimer = setTimeout(async () => {
-      try {
-        await saveDraft(await getDb(), invoiceId!, draft);
-        lastSavedJson = json;
-        saveState = 'saved';
-        savedAt = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-      } catch {
-        saveState = 'error';
-      }
-    }, 1500);
+    autosave?.notifyChanged();
   });
 
   const totals = $derived(
@@ -179,7 +188,7 @@
     try {
       const db = await getDb();
       if (invoiceId === null) return;
-      if (saveTimer) clearTimeout(saveTimer);
+      autosave?.cancelPending();
       await saveDraft(db, invoiceId, buildDraft());
       finalized = await finalizeInvoice(db, invoiceId);
       showConfirm = false;
@@ -205,6 +214,7 @@
     finalized = null;
     saveState = 'idle';
     lastSavedJson = JSON.stringify(buildDraft());
+    makeAutosave();
   }
 
   async function addClientRefresh(name: string): Promise<number> {

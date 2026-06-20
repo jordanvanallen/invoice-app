@@ -20,12 +20,38 @@ describe('catalog repo (clients/locations)', () => {
     expect(all).toEqual([{ id, name: 'Globex Finance Group', active: true }]);
   });
 
+  test('addEntry reuses an existing client name regardless of capitalization', async () => {
+    const db = await freshDb();
+    const id = await addEntry(db, 'clients', 'Globex Finance Group');
+    await setActive(db, 'clients', id, false);
+
+    const duplicateId = await addEntry(db, 'clients', '  globex finance group  ');
+
+    expect(duplicateId).toBe(id);
+    expect(await listEntries(db, 'clients')).toEqual([
+      { id, name: 'Globex Finance Group', active: true },
+    ]);
+  });
+
   test('rename fixes a misspelling', async () => {
     const db = await freshDb();
     const id = await addEntry(db, 'clients', 'Globex Finance Grp');
     await renameEntry(db, 'clients', id, 'Globex Finance Group');
     const [c] = await listEntries(db, 'clients');
     expect(c.name).toBe('Globex Finance Group');
+  });
+
+  test('renameEntry rejects a duplicate client name regardless of capitalization', async () => {
+    const db = await freshDb();
+    const first = await addEntry(db, 'clients', 'Globex Finance Group');
+    const second = await addEntry(db, 'clients', 'Summit Motors');
+
+    await expect(renameEntry(db, 'clients', second, 'globex finance group')).rejects.toThrow(/already exists/i);
+
+    expect((await listEntries(db, 'clients')).map((c) => [c.id, c.name])).toEqual([
+      [first, 'Globex Finance Group'],
+      [second, 'Summit Motors'],
+    ]);
   });
 
   test('listEntries can filter to active only', async () => {

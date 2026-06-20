@@ -18,13 +18,27 @@
   async function add() {
     const name = newName.trim();
     if (!name) return;
-    await addEntry(await getDb(), table, name);
-    newName = '';
-    note = '';
-    await refresh();
+    const existing = table === 'clients'
+      ? entries.find((e) => e.name.toLowerCase() === name.toLowerCase())
+      : null;
+    try {
+      await addEntry(await getDb(), table, name);
+      newName = '';
+      note = existing ? `"${existing.name}" is already in your list.` : '';
+      await refresh();
+    } catch (e) {
+      note = (e as Error).message;
+    }
   }
   async function rename(id: number, name: string) {
-    if (name.trim()) await renameEntry(await getDb(), table, id, name.trim());
+    if (!name.trim()) return;
+    try {
+      await renameEntry(await getDb(), table, id, name.trim());
+      note = '';
+    } catch (e) {
+      note = (e as Error).message;
+      await refresh();
+    }
   }
   async function toggle(e: CatalogEntry) {
     await setActive(await getDb(), table, e.id, !e.active);

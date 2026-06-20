@@ -14,8 +14,31 @@ interface CatalogRow {
   active: number;
 }
 
+function nameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
 export async function addEntry(db: Db, table: CatalogTable, name: string): Promise<number> {
-  const r = await db.execute(`INSERT INTO ${table} (name) VALUES (?)`, [name]);
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Name is required.');
+
+  if (table === 'clients') {
+    const key = nameKey(trimmed);
+    const [existing] = await db.select<{ id: number; active: number }>(
+      'SELECT id, active FROM clients WHERE name_key = ?',
+      [key],
+    );
+    if (existing) {
+      if (existing.active !== 1) {
+        await db.execute('UPDATE clients SET active = 1 WHERE id = ?', [existing.id]);
+      }
+      return existing.id;
+    }
+    const r = await db.execute('INSERT INTO clients (name, name_key) VALUES (?, ?)', [trimmed, key]);
+    return r.lastInsertId as number;
+  }
+
+  const r = await db.execute(`INSERT INTO ${table} (name) VALUES (?)`, [trimmed]);
   return r.lastInsertId as number;
 }
 
@@ -30,7 +53,21 @@ export async function listEntries(
 }
 
 export async function renameEntry(db: Db, table: CatalogTable, id: number, name: string): Promise<void> {
-  await db.execute(`UPDATE ${table} SET name = ? WHERE id = ?`, [name, id]);
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Name is required.');
+
+  if (table === 'clients') {
+    const key = nameKey(trimmed);
+    const [existing] = await db.select<{ id: number }>(
+      'SELECT id FROM clients WHERE name_key = ? AND id != ?',
+      [key, id],
+    );
+    if (existing) throw new Error(`A client named "${trimmed}" already exists.`);
+    await db.execute('UPDATE clients SET name = ?, name_key = ? WHERE id = ?', [trimmed, key, id]);
+    return;
+  }
+
+  await db.execute(`UPDATE ${table} SET name = ? WHERE id = ?`, [trimmed, id]);
 }
 
 export async function setActive(db: Db, table: CatalogTable, id: number, active: boolean): Promise<void> {

@@ -19,14 +19,19 @@
   let textSize = $state<TextSize>('normal');
   let invoiceFolder = $state('');
 
-  function setTheme(t: Theme) { theme = t; applyTheme(t); }
-  function setSize(s: TextSize) { textSize = s; applyTextSize(s); }
+  function markSaved() {
+    saveState = 'saved';
+    savedAt = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    errorMsg = '';
+  }
+  function setTheme(t: Theme) { theme = t; applyTheme(t); markSaved(); }
+  function setSize(s: TextSize) { textSize = s; applyTextSize(s); markSaved(); }
 
   async function chooseInvoiceFolder() {
     const picked = await open({ directory: true, title: 'Choose where to save invoice PDFs' });
-    if (typeof picked === 'string') { setInvoiceFolder(picked); invoiceFolder = picked; }
+    if (typeof picked === 'string') { setInvoiceFolder(picked); invoiceFolder = picked; markSaved(); }
   }
-  function useDownloadsInvoice() { setInvoiceFolder(''); invoiceFolder = ''; }
+  function useDownloadsInvoice() { setInvoiceFolder(''); invoiceFolder = ''; markSaved(); }
 
   let appVersion = $state('');
   let updateMsg = $state('');
@@ -42,6 +47,7 @@
     await openPdfPath(invoiceFolder || (await downloadDir()));
   }
   let saveState = $state<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  let savedAt = $state('');
   let errorMsg = $state('');
 
   let inspectorName = $state('');
@@ -135,7 +141,7 @@
         logoDataUrl,
       };
       await saveSettings(s);
-      saveState = 'saved';
+      markSaved();
     } catch (e) {
       saveState = 'error';
       errorMsg = (e as Error).message;
@@ -145,7 +151,7 @@
 
 <div class="head">
   <h1>Settings</h1>
-  <SaveStatusChip state={saveState} />
+  <SaveStatusChip state={saveState} {savedAt} />
 </div>
 
 {#if !loaded}
@@ -232,7 +238,10 @@
 
     {#if errorMsg}<p class="err">Couldn't save: {errorMsg}</p>{/if}
     {#if attempted && !allValid}<p class="err">Please fix the highlighted fields before saving.</p>{/if}
-    <div><BigButton onclick={save}>Save settings</BigButton></div>
+    <div class="save-row">
+      <BigButton onclick={save}>Save settings</BigButton>
+      <SaveStatusChip state={saveState} {savedAt} />
+    </div>
   </div>
 {/if}
 
@@ -240,6 +249,7 @@
   .head { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-6); }
   h1 { font-size: var(--fs-xl); font-weight: 700; margin: 0; }
   .form { display: flex; flex-direction: column; gap: var(--sp-8); max-width: 640px; }
+  .save-row { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
   section { display: flex; flex-direction: column; gap: var(--sp-4); }
   h2 { font-size: var(--fs-lg); font-weight: 600; margin: 0; color: var(--accent-strong); }
   .err { color: var(--red-600); margin: 0; }

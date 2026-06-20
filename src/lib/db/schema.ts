@@ -82,4 +82,23 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE settings ADD COLUMN logo_data_url TEXT NOT NULL DEFAULT ''`,
     ],
   },
+  {
+    version: 3,
+    statements: [
+      `ALTER TABLE clients ADD COLUMN name_key TEXT NOT NULL DEFAULT ''`,
+      `UPDATE clients
+          SET name_key = lower(trim(name)) ||
+            CASE
+              WHEN (
+                SELECT COUNT(*)
+                  FROM clients AS older
+                 WHERE lower(trim(older.name)) = lower(trim(clients.name))
+                   AND older.id < clients.id
+              ) = 0
+              THEN ''
+              ELSE '#' || id
+            END`,
+      `CREATE UNIQUE INDEX idx_clients_name_key ON clients(name_key)`,
+    ],
+  },
 ];
