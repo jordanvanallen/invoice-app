@@ -21,4 +21,7 @@ describe('checkOverride', () => {
   test('rejects non-positive sequences', () => {
     expect(checkOverride(0, taken)).toEqual({ ok: false, message: 'Invoice number must be a positive integer.' });
   });
+  test('rejects decimal sequences', () => {
+    expect(checkOverride(11.5, taken)).toEqual({ ok: false, message: 'Invoice number must be a positive integer.' });
+  });
 });

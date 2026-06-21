@@ -11,7 +11,8 @@
   import { loadClients, loadLocations, addClient as addClientDb, addLocation as addLocationDb } from '$lib/stores/catalog';
   import { getDb } from '$lib/db';
   import { createDraft, loadDraft, saveDraft, latestDraftId, finalizeInvoice, peekNextSeq, loadBilledHistory, type BilledHistory } from '$lib/db/invoice-repo';
-  import { formatInvoiceNumber } from '$lib/numbering';
+  import { takenSeqs } from '$lib/db/numbering-repo';
+  import { checkOverride, formatInvoiceNumber } from '$lib/numbering';
   import { computeTotals } from '$lib/totals';
   import { buildFinalizedSnapshot } from '$lib/snapshot';
   import { defaultInvoicePeriod } from '$lib/ui/date';
@@ -21,6 +22,7 @@
   import { missingFinalizeFields, findDuplicates } from '$lib/validation';
   import { formatDollars } from '$lib/money';
   import { bpToPercentInput } from '$lib/ui/format';
+  import { resolveInvoiceSequenceState } from '$lib/ui/invoiceSequence';
   import { createAutosaveController, type AutosaveController } from '$lib/ui/autosave';
   import { handleWindowCloseRequest } from '$lib/ui/windowClose';
   import type { Settings, DraftInvoice, FinalizedSnapshot } from '$lib/types';
@@ -41,6 +43,10 @@
   let issueDate = $state('');
   let periodStart = $state('');
   let periodEnd = $state('');
+  let invoiceSeqText = $state('');
+  let invoiceSeqTouched = $state(false);
+  let takenSequences = $state<number[]>([]);
+  let takenSequencesYear = $state<number | null>(null);
   let todayIso = $state('');
   let completed = $state<EditorRow[]>([]);
   let noshow = $state<EditorRow[]>([]);
@@ -49,10 +55,14 @@
   let autosave: AutosaveController | null = null;
   let lastSavedJson = '';
 
+  function invoiceYear(): number {
+    return Number(issueDate.slice(0, 4)) || new Date().getFullYear();
+  }
+
   function buildDraft(): DraftInvoice {
     return {
-      seq: null,
-      year: Number(issueDate.slice(0, 4)) || new Date().getFullYear(),
+      seq: seqState.draftSeq,
+      year: invoiceYear(),
       issueDate, periodStart, periodEnd,
       // Persisted columns only — exclude editor-only fields (uid, feeText, mileageText)
       // so reformatting the fee/mileage text on blur doesn't churn the autosave.
@@ -102,6 +112,8 @@
     issueDate = draft.issueDate || def.issueDate;
     periodStart = draft.periodStart || def.periodStart;
     periodEnd = draft.periodEnd || def.periodEnd;
+    invoiceSeqText = draft.seq === null ? '' : String(draft.seq);
+    invoiceSeqTouched = draft.seq !== null;
     completed = draft.lines.filter((l) => l.type === 'completed').map(toEditorRow);
     noshow = draft.lines.filter((l) => l.type === 'noshow').map(toEditorRow);
     lastSavedJson = JSON.stringify(buildDraft());
@@ -146,11 +158,49 @@
     settings ? computeTotals([...completed, ...noshow], settings.taxRateBp) : null,
   );
 
-  let nextNumber = $state('');
+  let seqRefreshRequest = 0;
+  const seqState = $derived(resolveInvoiceSequenceState({
+    invoiceSeqText,
+    invoiceYear: invoiceYear(),
+    takenSequences,
+    takenSequencesYear,
+  }));
+  const seqValidation = $derived(seqState.message);
+  const seqHelper = $derived(seqState.helperMessage);
+  const seqNeedsAttention = $derived(seqState.status !== 'ready');
+  const seqIsInvalid = $derived(seqState.status === 'invalid');
+  const nextNumber = $derived(
+    seqState.draftSeq === null ? '' : formatInvoiceNumber(seqState.draftSeq, invoiceYear()),
+  );
+
   $effect(() => {
-    const yr = Number(issueDate.slice(0, 4));
-    if (!loaded || !yr || finalized) return;
-    getDb().then((db) => peekNextSeq(db, yr)).then((n) => { nextNumber = formatInvoiceNumber(n, yr); });
+    const yr = invoiceYear();
+    const currentInvoiceId = invoiceId;
+    if (!loaded || !yr || finalized || currentInvoiceId === null) return;
+    const requestId = ++seqRefreshRequest;
+    let cancelled = false;
+    getDb().then(async (db) => {
+      const [next, taken] = await Promise.all([
+        peekNextSeq(db, yr, currentInvoiceId),
+        takenSeqs(db, yr, currentInvoiceId),
+      ]);
+      if (
+        cancelled ||
+        requestId !== seqRefreshRequest ||
+        invoiceId !== currentInvoiceId ||
+        invoiceYear() !== yr
+      ) {
+        return;
+      }
+      takenSequences = taken;
+      takenSequencesYear = yr;
+      if (!invoiceSeqTouched || !invoiceSeqText.trim()) {
+        invoiceSeqText = String(next);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   });
 
   const dups = $derived(findDuplicates([...completed, ...noshow]));
@@ -167,9 +217,8 @@
   let previewSnap = $state<FinalizedSnapshot | null>(null);
   async function openPreview() {
     if (!settings) return;
-    const yr = Number(issueDate.slice(0, 4)) || new Date().getFullYear();
-    const seq = await peekNextSeq(await getDb(), yr);
-    previewSnap = buildFinalizedSnapshot(buildDraft(), settings, seq);
+    if (seqState.status !== 'ready' || seqState.draftSeq === null) return;
+    previewSnap = buildFinalizedSnapshot(buildDraft(), settings, seqState.draftSeq);
     showPreview = true;
   }
 
@@ -179,7 +228,7 @@
 
   const allLines = $derived([...completed, ...noshow]);
   const blockerCount = $derived(allLines.filter((l) => missingFinalizeFields(l).length > 0).length);
-  const canFinalize = $derived(allLines.length > 0 && blockerCount === 0);
+  const canFinalize = $derived(allLines.length > 0 && blockerCount === 0 && seqState.status === 'ready');
 
   function jumpToBlocker() {
     const blocker = allLines.find((l) => missingFinalizeFields(l).length > 0);
@@ -193,7 +242,7 @@
     finalizeError = '';
     try {
       const db = await getDb();
-      if (invoiceId === null) return;
+      if (invoiceId === null || seqState.status !== 'ready') return;
       autosave?.cancelPending();
       await saveDraft(db, invoiceId, buildDraft());
       finalized = await finalizeInvoice(db, invoiceId);
@@ -215,6 +264,10 @@
     issueDate = def.issueDate;
     periodStart = def.periodStart;
     periodEnd = def.periodEnd;
+    invoiceSeqText = '';
+    invoiceSeqTouched = false;
+    takenSequences = [];
+    takenSequencesYear = null;
     completed = [];
     noshow = [];
     finalized = null;
@@ -253,7 +306,25 @@
   <div class="head">
     <h1>New Invoice</h1>
     <StatusPill status="draft" />
-    {#if nextNumber}<span class="next-num">Will be #{nextNumber}</span>{/if}
+    <label class="invoice-number">
+      <span>Invoice #</span>
+      <input
+        class:warn={seqIsInvalid}
+        class="tnum"
+        inputmode="numeric"
+        bind:value={invoiceSeqText}
+        oninput={() => { invoiceSeqTouched = true; }}
+        aria-label="Invoice sequence number"
+      />
+      <span>- {invoiceYear()}</span>
+    </label>
+    {#if seqValidation}
+      <span class="seq-msg warn-msg">{seqValidation}</span>
+    {:else if seqHelper}
+      <span class="seq-msg">{seqHelper}</span>
+    {:else if nextNumber}
+      <span class="seq-msg">Will be #{nextNumber}</span>
+    {/if}
     <span class="spacer"></span>
     <SaveStatusChip state={saveState} {savedAt} />
   </div>
@@ -306,10 +377,12 @@
       <div class="act">
         {#if allLines.length === 0}
           <span class="hint">Add at least one inspection to finish.</span>
-        {:else if !canFinalize}
+        {:else if blockerCount > 0}
           <button type="button" class="hint hint-btn" onclick={jumpToBlocker}>Fix {blockerCount} {blockerCount === 1 ? 'row' : 'rows'} to finish →</button>
+        {:else if seqValidation}
+          <span class="hint">{seqState.status === 'checking' ? seqValidation : 'Fix the invoice number to finish.'}</span>
         {/if}
-        <BigButton variant="secondary" onclick={openPreview} disabled={allLines.length === 0}>Preview</BigButton>
+        <BigButton variant="secondary" onclick={openPreview} disabled={allLines.length === 0 || seqNeedsAttention}>Preview</BigButton>
         <BigButton onclick={() => (showConfirm = true)} disabled={!canFinalize}>Lock &amp; Save</BigButton>
       </div>
     </div>
@@ -342,7 +415,11 @@
 <style>
   .head { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); }
   .head .spacer { flex: 1; }
-  .next-num { color: var(--text-muted); font-size: var(--fs-sm); }
+  .invoice-number { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 600; }
+  .invoice-number input { width: 72px; height: var(--input-h); padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--text-primary); font-size: var(--fs-base); }
+  .invoice-number input.warn { border-color: var(--amber-600); border-left-width: 3px; }
+  .seq-msg { color: var(--text-muted); font-size: var(--fs-sm); }
+  .seq-msg.warn-msg { color: var(--amber-600); }
   h1 { font-size: var(--fs-xl); font-weight: 700; margin: 0; }
   .period { display: flex; gap: var(--sp-8); margin-bottom: var(--sp-6); flex-wrap: wrap; }
   .period label { display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--fs-sm); font-weight: 600; color: var(--text-secondary); }
