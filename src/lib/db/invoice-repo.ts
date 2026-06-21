@@ -1,8 +1,9 @@
 import type { Db } from './db';
 import type { DraftInvoice, LineItem, FinalizedSnapshot } from '../types';
 import { buildFinalizedSnapshot } from '../snapshot';
+import { checkOverride } from '../numbering';
 import { getSettings } from './settings-repo';
-import { allocateSeq } from './numbering-repo';
+import { allocateSeq, reserveSeq, takenSeqs } from './numbering-repo';
 
 export interface DraftHeader {
   year: number;
@@ -78,16 +79,27 @@ export async function loadDraft(db: Db, invoiceId: number): Promise<DraftInvoice
   };
 }
 
+type SaveableDraft = Omit<DraftInvoice, 'seq'> & { seq?: number | null };
+
+function deriveInvoiceYear(issueDate: string, fallbackYear: number): number {
+  const yearText = issueDate.slice(0, 4);
+  return /^\d{4}$/.test(yearText) ? Number(yearText) : fallbackYear;
+}
+
 export async function saveDraft(
   db: Db,
   invoiceId: number,
-  draft: Omit<DraftInvoice, 'seq'>,
+  draft: SaveableDraft,
 ): Promise<void> {
   await db.execute('BEGIN');
   try {
+    const year = deriveInvoiceYear(draft.issueDate, draft.year);
+    if (draft.seq !== undefined && draft.seq !== null) {
+      validateSeqResult(draft.seq, await takenSeqs(db, year, invoiceId));
+    }
     await db.execute(
-      `UPDATE invoices SET year = ?, issue_date = ?, period_start = ?, period_end = ? WHERE id = ?`,
-      [draft.year, draft.issueDate, draft.periodStart, draft.periodEnd, invoiceId],
+      `UPDATE invoices SET seq = ?, year = ?, issue_date = ?, period_start = ?, period_end = ? WHERE id = ?`,
+      [draft.seq ?? null, year, draft.issueDate, draft.periodStart, draft.periodEnd, invoiceId],
     );
     await db.execute('DELETE FROM line_items WHERE invoice_id = ?', [invoiceId]);
     for (const l of draft.lines) {
@@ -107,25 +119,38 @@ export async function saveDraft(
   }
 }
 
+function validateSeqResult(seq: number, taken: number[]): void {
+  const result = checkOverride(seq, taken);
+  if (!result.ok) throw new Error(result.message);
+}
+
+async function finalizeSelectedSeq(db: Db, invoiceId: number, year: number, seq: number): Promise<number> {
+  validateSeqResult(seq, await takenSeqs(db, year, invoiceId));
+  return reserveSeq(db, year, seq);
+}
+
 /**
  * Finalize a draft: allocate its seq, freeze the full snapshot + totals, set
  * status. One transaction. Returns the snapshot.
  */
 export async function finalizeInvoice(db: Db, invoiceId: number): Promise<FinalizedSnapshot> {
   const draft = await loadDraft(db, invoiceId);
+  const normalizedDraft = { ...draft, year: deriveInvoiceYear(draft.issueDate, draft.year) };
   const settings = await getSettings(db);
 
   await db.execute('BEGIN');
   try {
-    const seq = await allocateSeq(db, draft.year);
-    const snapshot = buildFinalizedSnapshot(draft, settings, seq);
+    const seq = normalizedDraft.seq === null
+      ? await allocateSeq(db, normalizedDraft.year)
+      : await finalizeSelectedSeq(db, invoiceId, normalizedDraft.year, normalizedDraft.seq);
+    const snapshot = buildFinalizedSnapshot(normalizedDraft, settings, seq);
     await db.execute(
       `UPDATE invoices SET
-         seq = ?, status = 'finalized', finalized_at = ?,
+         seq = ?, year = ?, status = 'finalized', finalized_at = ?,
          subtotal_cents = ?, tax_cents = ?, total_cents = ?, snapshot_json = ?
        WHERE id = ?`,
       [
-        seq, snapshot.issueDate,
+        seq, normalizedDraft.year, snapshot.issueDate,
         snapshot.totals.subtotalCents, snapshot.totals.taxCents, snapshot.totals.totalCents,
         JSON.stringify(snapshot), invoiceId,
       ],
@@ -319,9 +344,16 @@ export async function rangeClientBreakdown(db: Db, start: string, end: string): 
 }
 
 /** The seq the next finalize will assign for a year (does NOT mutate the counter). */
-export async function peekNextSeq(db: Db, year: number): Promise<number> {
-  const rows = await db.select<{ last_seq: number }>('SELECT last_seq FROM year_counters WHERE year = ?', [year]);
-  return (rows[0]?.last_seq ?? 0) + 1;
+export async function peekNextSeq(db: Db, year: number, excludeInvoiceId?: number): Promise<number> {
+  const params: unknown[] = [year];
+  const exclude = excludeInvoiceId === undefined ? '' : ' AND id != ?';
+  if (excludeInvoiceId !== undefined) params.push(excludeInvoiceId);
+  const rows = await db.select<{ max_seq: number | null }>(
+    `SELECT MAX(seq) AS max_seq FROM invoices WHERE year = ? AND seq IS NOT NULL${exclude}`,
+    params,
+  );
+  const counter = await db.select<{ last_seq: number }>('SELECT last_seq FROM year_counters WHERE year = ?', [year]);
+  return Math.max(counter[0]?.last_seq ?? 0, rows[0]?.max_seq ?? 0) + 1;
 }
 
 /** Cancel a finalized invoice: mark it void (kept in the DB, excluded from totals/History). */

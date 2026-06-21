@@ -76,6 +76,105 @@ describe('finalize + reprint', () => {
     expect(row.total_cents).toBe(4294);
   });
 
+  test('saveDraft preserves a selected invoice sequence on reload', async () => {
+    const db = await freshDb();
+    const id = await createDraft(db, { year: 2026, issueDate: '2026-06-21', periodStart: '2026-06-15', periodEnd: '2026-06-21' });
+
+    await saveDraft(db, id, {
+      seq: 11,
+      year: 2026,
+      issueDate: '2026-06-21',
+      periodStart: '2026-06-15',
+      periodEnd: '2026-06-21',
+      lines: [line()],
+    });
+
+    expect((await loadDraft(db, id)).seq).toBe(11);
+  });
+
+  test('finalizes with the selected sequence and advances the next default', async () => {
+    const db = await freshDb();
+    const id = await createDraft(db, { year: 2026, issueDate: '2026-06-21', periodStart: '2026-06-15', periodEnd: '2026-06-21' });
+    await saveDraft(db, id, {
+      seq: 11,
+      year: 2026,
+      issueDate: '2026-06-21',
+      periodStart: '2026-06-15',
+      periodEnd: '2026-06-21',
+      lines: [line()],
+    });
+
+    const snap = await finalizeInvoice(db, id);
+
+    expect(snap.invoiceNumber).toBe('11-2026');
+    expect(await peekNextSeq(db, 2026)).toBe(12);
+  });
+
+  test('finalize derives the invoice year from issueDate when the saved draft year mismatches', async () => {
+    const db = await freshDb();
+    const id = await createDraft(db, { year: 2026, issueDate: '2026-12-30', periodStart: '2026-12-15', periodEnd: '2026-12-30' });
+    await saveDraft(db, id, {
+      seq: 11,
+      year: 2026,
+      issueDate: '2027-01-03',
+      periodStart: '2026-12-15',
+      periodEnd: '2026-12-30',
+      lines: [line()],
+    });
+
+    const snap = await finalizeInvoice(db, id);
+    const [row] = await db.select<{ year: number; seq: number }>(
+      'SELECT year, seq FROM invoices WHERE id = ?',
+      [id],
+    );
+
+    expect(snap.invoiceNumber).toBe('11-2027');
+    expect(snap.year).toBe(2027);
+    expect(row.year).toBe(2027);
+    expect(row.seq).toBe(11);
+    expect(await peekNextSeq(db, 2027)).toBe(12);
+  });
+
+  test('rejects saving a selected sequence already used by another invoice in the year', async () => {
+    const db = await freshDb();
+    const first = await createDraft(db, { year: 2026, issueDate: '2026-06-21', periodStart: '2026-06-15', periodEnd: '2026-06-21' });
+    await saveDraft(db, first, {
+      seq: 11,
+      year: 2026,
+      issueDate: '2026-06-21',
+      periodStart: '2026-06-15',
+      periodEnd: '2026-06-21',
+      lines: [line()],
+    });
+    await finalizeInvoice(db, first);
+
+    const second = await createDraft(db, { year: 2026, issueDate: '2026-06-22', periodStart: '2026-06-15', periodEnd: '2026-06-21' });
+    await expect(saveDraft(db, second, {
+      seq: 11,
+      year: 2026,
+      issueDate: '2026-06-22',
+      periodStart: '2026-06-15',
+      periodEnd: '2026-06-21',
+      lines: [line({ inspectionNumber: '22222222', vin8: 'XY12AB98' })],
+    })).rejects.toThrow('Invoice number 11 is already used this year.');
+  });
+
+  test('peekNextSeq follows the highest stored sequence while ignoring the current draft', async () => {
+    const db = await freshDb();
+    const id = await createDraft(db, { year: 2026, issueDate: '2026-06-21', periodStart: '2026-06-15', periodEnd: '2026-06-21' });
+    await saveDraft(db, id, {
+      seq: 11,
+      year: 2026,
+      issueDate: '2026-06-21',
+      periodStart: '2026-06-15',
+      periodEnd: '2026-06-21',
+      lines: [line()],
+    });
+
+    expect(await peekNextSeq(db, 2026)).toBe(12);
+    expect(await peekNextSeq(db, 2026, id)).toBe(1);
+  });
+
   test('reprint is value-stable after the client is later renamed', async () => {
     const db = await freshDb();
     const clientId = await addEntry(db, 'clients', 'Globex Finance Grp');
