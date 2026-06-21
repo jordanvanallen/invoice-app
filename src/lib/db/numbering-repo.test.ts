@@ -1,7 +1,7 @@
 import { test, expect, describe } from 'vitest';
 import { createSqlJsDb } from './sqljs-adapter';
 import { runMigrations } from './migrate';
-import { allocateSeq, takenSeqs } from './numbering-repo';
+import { allocateSeq, reserveSeq, takenSeqs } from './numbering-repo';
 
 async function freshDb() {
   const db = await createSqlJsDb();
@@ -32,5 +32,28 @@ describe('numbering repo', () => {
     );
     expect(await takenSeqs(db, 2026)).toEqual([5]);
     expect(await takenSeqs(db, 2027)).toEqual([]);
+  });
+
+  test('reserveSeq advances the counter to a manual number without moving backward', async () => {
+    const db = await freshDb();
+
+    expect(await reserveSeq(db, 2026, 11)).toBe(11);
+    expect(await allocateSeq(db, 2026)).toBe(12);
+
+    expect(await reserveSeq(db, 2026, 5)).toBe(5);
+    expect(await allocateSeq(db, 2026)).toBe(13);
+  });
+
+  test('takenSeqs can ignore the current draft invoice', async () => {
+    const db = await freshDb();
+    await db.execute(
+      "INSERT INTO invoices (id, year, seq, status, issue_date) VALUES (10, 2026, 11, 'draft', '2026-06-21')",
+    );
+    await db.execute(
+      "INSERT INTO invoices (id, year, seq, status, issue_date) VALUES (11, 2026, 12, 'finalized', '2026-06-22')",
+    );
+
+    expect(await takenSeqs(db, 2026)).toEqual([11, 12]);
+    expect(await takenSeqs(db, 2026, 10)).toEqual([12]);
   });
 });
