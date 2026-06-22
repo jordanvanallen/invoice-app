@@ -6,11 +6,24 @@ import { createDraft, loadDraft, saveDraft, finalizeInvoice, reprintSnapshot, li
 import { allocateSeq } from './numbering-repo';
 import { getSettings, saveSettings } from './settings-repo';
 import type { LineItem } from '../types';
+import type { Db, DbResult } from './db';
 
 async function freshDb() {
   const db = await createSqlJsDb();
   await runMigrations(db);
   return db;
+}
+
+function withoutSqlTransactions(db: Db): Db {
+  return {
+    async execute(sql: string, params: unknown[] = []): Promise<DbResult> {
+      if (/^\s*(BEGIN|COMMIT|ROLLBACK)\b/i.test(sql)) {
+        throw new Error(`raw transaction command is not supported: ${sql}`);
+      }
+      return db.execute(sql, params);
+    },
+    select: db.select.bind(db),
+  };
 }
 
 function line(over: Partial<LineItem> = {}): LineItem {
@@ -40,6 +53,23 @@ describe('invoice draft repo', () => {
     });
     const draft = await loadDraft(db, id);
     expect(draft.lines.map((l) => l.inspectionNumber)).toEqual(['A', 'B']);
+  });
+
+  test('saveDraft works on adapters that do not support raw transaction commands', async () => {
+    const base = await freshDb();
+    const db = withoutSqlTransactions(base);
+    const id = await createDraft(db, { year: 2026, issueDate: '2026-05-28', periodStart: '2026-05-21', periodEnd: '2026-05-27' });
+
+    await saveDraft(db, id, {
+      seq: 1,
+      year: 2026,
+      issueDate: '2026-05-28',
+      periodStart: '2026-05-21',
+      periodEnd: '2026-05-27',
+      lines: [line()],
+    });
+
+    expect((await loadDraft(db, id)).lines).toHaveLength(1);
   });
 
   test('a linked client name resolves LIVE — renaming the client updates an open draft', async () => {
@@ -74,6 +104,21 @@ describe('finalize + reprint', () => {
     expect(row.status).toBe('finalized');
     expect(row.seq).toBe(1);
     expect(row.total_cents).toBe(4294);
+  });
+
+  test('finalizeInvoice works on adapters that do not support raw transaction commands', async () => {
+    const base = await freshDb();
+    const db = withoutSqlTransactions(base);
+    const id = await createDraft(db, { year: 2026, issueDate: '2026-05-28', periodStart: '2026-05-21', periodEnd: '2026-05-27' });
+    await saveDraft(db, id, {
+      year: 2026, issueDate: '2026-05-28', periodStart: '2026-05-21', periodEnd: '2026-05-27',
+      lines: [line()],
+    });
+
+    const snap = await finalizeInvoice(db, id);
+
+    expect(snap.invoiceNumber).toBe('1-2026');
+    expect(await getInvoiceStatus(db, id)).toBe('finalized');
   });
 
   test('saveDraft preserves a selected invoice sequence on reload', async () => {

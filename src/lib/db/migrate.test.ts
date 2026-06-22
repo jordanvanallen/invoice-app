@@ -1,6 +1,19 @@
 import { test, expect, describe } from 'vitest';
 import { createSqlJsDb } from './sqljs-adapter';
 import { runMigrations } from './migrate';
+import type { Db, DbResult } from './db';
+
+function withoutSqlTransactions(db: Db): Db {
+  return {
+    async execute(sql: string, params: unknown[] = []): Promise<DbResult> {
+      if (/^\s*(BEGIN|COMMIT|ROLLBACK)\b/i.test(sql)) {
+        throw new Error(`raw transaction command is not supported: ${sql}`);
+      }
+      return db.execute(sql, params);
+    },
+    select: db.select.bind(db),
+  };
+}
 
 async function tableNames(db: Awaited<ReturnType<typeof createSqlJsDb>>): Promise<string[]> {
   const rows = await db.select<{ name: string }>(
@@ -57,5 +70,12 @@ describe('runMigrations', () => {
     await runMigrations(db);
     const s = await db.select<{ c: number }>('SELECT COUNT(*) AS c FROM settings');
     expect(s[0].c).toBe(1);
+  });
+
+  test('runs on adapters that do not support raw transaction commands', async () => {
+    const db = withoutSqlTransactions(await createSqlJsDb());
+    await expect(runMigrations(db)).resolves.toBe(3);
+    const s = await db.select<{ id: number }>('SELECT id FROM settings');
+    expect(s).toEqual([{ id: 1 }]);
   });
 });

@@ -8,6 +8,7 @@ export async function createSqlJsDb(): Promise<Db & { export(): Uint8Array; clos
   raw.run('PRAGMA foreign_keys = ON');
 
   return {
+    supportsSqlTransactions: true,
     async execute(sql: string, params: unknown[] = []): Promise<DbResult> {
       raw.run(sql, params as never[]);
       const idRows = raw.exec('SELECT last_insert_rowid() AS id');

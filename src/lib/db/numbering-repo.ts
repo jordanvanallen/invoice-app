@@ -3,7 +3,7 @@ import type { Db } from './db';
 /**
  * Atomically allocate the next sequence for a year from a monotonic counter.
  * The counter is never re-derived from surviving invoices, so deletes/voids do
- * not recycle numbers. Call inside the finalize transaction.
+ * not recycle numbers.
  */
 export async function allocateSeq(db: Db, year: number): Promise<number> {
   await db.execute(

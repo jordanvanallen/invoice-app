@@ -1,4 +1,5 @@
 import type { Db } from './db';
+import { runInTransaction } from './db';
 import type { DraftInvoice, LineItem, FinalizedSnapshot } from '../types';
 import { buildFinalizedSnapshot } from '../snapshot';
 import { checkOverride } from '../numbering';
@@ -91,8 +92,7 @@ export async function saveDraft(
   invoiceId: number,
   draft: SaveableDraft,
 ): Promise<void> {
-  await db.execute('BEGIN');
-  try {
+  await runInTransaction(db, async () => {
     const year = deriveInvoiceYear(draft.issueDate, draft.year);
     if (draft.seq !== undefined && draft.seq !== null) {
       validateSeqResult(draft.seq, await takenSeqs(db, year, invoiceId));
@@ -112,11 +112,7 @@ export async function saveDraft(
          l.locationId, l.location, l.date, l.vin8, l.mileageCents, l.feeCents],
       );
     }
-    await db.execute('COMMIT');
-  } catch (err) {
-    await db.execute('ROLLBACK');
-    throw err;
-  }
+  });
 }
 
 function validateSeqResult(seq: number, taken: number[]): void {
@@ -138,12 +134,12 @@ export async function finalizeInvoice(db: Db, invoiceId: number): Promise<Finali
   const normalizedDraft = { ...draft, year: deriveInvoiceYear(draft.issueDate, draft.year) };
   const settings = await getSettings(db);
 
-  await db.execute('BEGIN');
-  try {
+  let snapshot: FinalizedSnapshot | null = null;
+  await runInTransaction(db, async () => {
     const seq = normalizedDraft.seq === null
       ? await allocateSeq(db, normalizedDraft.year)
       : await finalizeSelectedSeq(db, invoiceId, normalizedDraft.year, normalizedDraft.seq);
-    const snapshot = buildFinalizedSnapshot(normalizedDraft, settings, seq);
+    snapshot = buildFinalizedSnapshot(normalizedDraft, settings, seq);
     await db.execute(
       `UPDATE invoices SET
          seq = ?, year = ?, status = 'finalized', finalized_at = ?,
@@ -155,12 +151,9 @@ export async function finalizeInvoice(db: Db, invoiceId: number): Promise<Finali
         JSON.stringify(snapshot), invoiceId,
       ],
     );
-    await db.execute('COMMIT');
-    return snapshot;
-  } catch (err) {
-    await db.execute('ROLLBACK');
-    throw err;
-  }
+  });
+  if (!snapshot) throw new Error(`Invoice ${invoiceId} could not be finalized.`);
+  return snapshot;
 }
 
 /** Read a finalized invoice's frozen snapshot. Throws if not finalized. */
@@ -387,14 +380,9 @@ export async function getInvoiceStatus(db: Db, id: number): Promise<string | nul
 export async function deleteVoidedInvoice(db: Db, id: number): Promise<boolean> {
   const [row] = await db.select<{ status: string }>('SELECT status FROM invoices WHERE id = ?', [id]);
   if (row?.status !== 'void') return false;
-  await db.execute('BEGIN');
-  try {
+  await runInTransaction(db, async () => {
     await db.execute('DELETE FROM line_items WHERE invoice_id = ?', [id]);
     await db.execute('DELETE FROM invoices WHERE id = ?', [id]);
-    await db.execute('COMMIT');
-    return true;
-  } catch (e) {
-    await db.execute('ROLLBACK');
-    throw e;
-  }
+  });
+  return true;
 }
