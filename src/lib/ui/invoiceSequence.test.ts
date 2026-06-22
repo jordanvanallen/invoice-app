@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { resolveInvoiceSequenceState } from './invoiceSequence';
+import { canPersistInvoiceSequence, resolveInvoiceSequenceState } from './invoiceSequence';
 
 describe('resolveInvoiceSequenceState', () => {
   test('blocks on stale taken sequences until the current year finishes loading', () => {
@@ -45,5 +45,40 @@ describe('resolveInvoiceSequenceState', () => {
       parsedSeq: 9,
       status: 'ready',
     });
+  });
+});
+
+describe('canPersistInvoiceSequence', () => {
+  test('returns true for a ready sequence state', () => {
+    const state = resolveInvoiceSequenceState({
+      invoiceSeqText: '9',
+      invoiceYear: 2026,
+      takenSequences: [1, 2, 3, 8],
+      takenSequencesYear: 2026,
+    });
+
+    expect(canPersistInvoiceSequence(state)).toBe(true);
+  });
+
+  test('returns false while sequence validation is still checking', () => {
+    const state = resolveInvoiceSequenceState({
+      invoiceSeqText: '8',
+      invoiceYear: 2027,
+      takenSequences: [8],
+      takenSequencesYear: 2026,
+    });
+
+    expect(canPersistInvoiceSequence(state)).toBe(false);
+  });
+
+  test('returns false for invalid invoice-number text', () => {
+    const state = resolveInvoiceSequenceState({
+      invoiceSeqText: '11.5',
+      invoiceYear: 2026,
+      takenSequences: [1, 2, 3, 8],
+      takenSequencesYear: 2026,
+    });
+
+    expect(canPersistInvoiceSequence(state)).toBe(false);
   });
 });

@@ -12,7 +12,7 @@
   import { getDb } from '$lib/db';
   import { createDraft, loadDraft, saveDraft, latestDraftId, finalizeInvoice, peekNextSeq, loadBilledHistory, type BilledHistory } from '$lib/db/invoice-repo';
   import { takenSeqs } from '$lib/db/numbering-repo';
-  import { checkOverride, formatInvoiceNumber } from '$lib/numbering';
+  import { formatInvoiceNumber } from '$lib/numbering';
   import { computeTotals } from '$lib/totals';
   import { buildFinalizedSnapshot } from '$lib/snapshot';
   import { defaultInvoicePeriod } from '$lib/ui/date';
@@ -22,7 +22,7 @@
   import { missingFinalizeFields, findDuplicates } from '$lib/validation';
   import { formatDollars } from '$lib/money';
   import { bpToPercentInput } from '$lib/ui/format';
-  import { resolveInvoiceSequenceState } from '$lib/ui/invoiceSequence';
+  import { canPersistInvoiceSequence, resolveInvoiceSequenceState } from '$lib/ui/invoiceSequence';
   import { createAutosaveController, type AutosaveController } from '$lib/ui/autosave';
   import { handleWindowCloseRequest } from '$lib/ui/windowClose';
   import type { Settings, DraftInvoice, FinalizedSnapshot } from '$lib/types';
@@ -127,7 +127,9 @@
       unlisten = await w.onCloseRequested(async (event) => {
         await handleWindowCloseRequest(event, {
           save: async () => {
-            if (invoiceId !== null) await saveDraft(await getDb(), invoiceId, buildDraft());
+            if (invoiceId !== null && canPersistInvoiceSequence(seqState)) {
+              await saveDraft(await getDb(), invoiceId, buildDraft());
+            }
           },
           destroy: () => w.destroy(),
           exit: async (code) => {
@@ -147,9 +149,13 @@
   // Debounced autosave: persists 1.5s after a real change. Skips save-on-load and
   // no-op re-saves by comparing against the last persisted snapshot.
   $effect(() => {
+    if (!loaded || invoiceId === null || finalized) return;
+    if (!canPersistInvoiceSequence(seqState)) {
+      autosave?.cancelPending();
+      return;
+    }
     const draft = buildDraft();
     const json = JSON.stringify(draft);
-    if (!loaded || invoiceId === null || finalized) return;
     if (json === lastSavedJson) return;
     autosave?.notifyChanged();
   });

@@ -10,6 +10,10 @@ export interface InvoiceSequenceState {
   helperMessage: string;
 }
 
+export function canPersistInvoiceSequence(state: InvoiceSequenceState): boolean {
+  return state.status === 'ready';
+}
+
 interface ResolveInvoiceSequenceArgs {
   invoiceSeqText: string;
   invoiceYear: number;
