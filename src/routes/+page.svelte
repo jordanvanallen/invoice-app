@@ -23,7 +23,12 @@
   import { missingFinalizeFields, findDuplicates } from '$lib/validation';
   import { formatDollars } from '$lib/money';
   import { bpToPercentInput } from '$lib/ui/format';
-  import { canPersistInvoiceSequence, resolveInvoiceSequenceState } from '$lib/ui/invoiceSequence';
+  import {
+    canPersistInvoiceSequence,
+    draftSeqForPersistence,
+    resolveInvoiceSequenceState,
+    shouldFillDefaultInvoiceSequence,
+  } from '$lib/ui/invoiceSequence';
   import { createAutosaveController, flushPendingAutosave, type AutosaveController } from '$lib/ui/autosave';
   import { handleWindowCloseRequest } from '$lib/ui/windowClose';
   import type { Settings, DraftInvoice, FinalizedSnapshot } from '$lib/types';
@@ -45,7 +50,6 @@
   let periodStart = $state('');
   let periodEnd = $state('');
   let invoiceSeqText = $state('');
-  let invoiceSeqTouched = $state(false);
   let takenSequences = $state<number[]>([]);
   let takenSequencesYear = $state<number | null>(null);
   let todayIso = $state('');
@@ -62,7 +66,7 @@
 
   function buildDraft(): DraftInvoice {
     return {
-      seq: seqState.draftSeq,
+      seq: draftSeqForPersistence(seqState),
       year: invoiceYear(),
       issueDate, periodStart, periodEnd,
       // Persisted columns only — exclude editor-only fields (uid, feeText, mileageText)
@@ -114,7 +118,6 @@
     periodStart = draft.periodStart || def.periodStart;
     periodEnd = draft.periodEnd || def.periodEnd;
     invoiceSeqText = draft.seq === null ? '' : String(draft.seq);
-    invoiceSeqTouched = draft.seq !== null;
     completed = draft.lines.filter((l) => l.type === 'completed').map(toEditorRow);
     noshow = draft.lines.filter((l) => l.type === 'noshow').map(toEditorRow);
     lastSavedJson = JSON.stringify(buildDraft());
@@ -206,7 +209,7 @@
       }
       takenSequences = taken;
       takenSequencesYear = yr;
-      if (!invoiceSeqTouched || !invoiceSeqText.trim()) {
+      if (shouldFillDefaultInvoiceSequence(invoiceSeqText)) {
         invoiceSeqText = String(next);
       }
     });
@@ -277,7 +280,6 @@
     periodStart = def.periodStart;
     periodEnd = def.periodEnd;
     invoiceSeqText = '';
-    invoiceSeqTouched = false;
     takenSequences = [];
     takenSequencesYear = null;
     completed = [];
@@ -325,7 +327,6 @@
         class="tnum"
         inputmode="numeric"
         bind:value={invoiceSeqText}
-        oninput={() => { invoiceSeqTouched = true; }}
         aria-label="Invoice sequence number"
       />
       <span>- {invoiceYear()}</span>
