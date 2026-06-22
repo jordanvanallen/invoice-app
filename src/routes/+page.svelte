@@ -29,7 +29,12 @@
     resolveInvoiceSequenceState,
     shouldFillDefaultInvoiceSequence,
   } from '$lib/ui/invoiceSequence';
-  import { createAutosaveController, flushPendingAutosave, type AutosaveController } from '$lib/ui/autosave';
+  import {
+    createAutosaveController,
+    flushPendingAutosave,
+    settleAutosaveBeforeManualSave,
+    type AutosaveController,
+  } from '$lib/ui/autosave';
   import { handleWindowCloseRequest } from '$lib/ui/windowClose';
   import type { Settings, DraftInvoice, FinalizedSnapshot } from '$lib/types';
   import type { CatalogEntry } from '$lib/db/catalog-repo';
@@ -226,6 +231,7 @@
   let showConfirm = $state(false);
   let finalized = $state<FinalizedSnapshot | null>(null);
   let finalizeError = $state('');
+  let finalizeSaving = $state(false);
 
   // --- Preview (read-only look at the invoice as it will print, before locking) ---
   let showPreview = $state(false);
@@ -255,10 +261,12 @@
 
   async function doFinalize() {
     finalizeError = '';
+    if (finalizeSaving) return;
+    if (invoiceId === null || seqState.status !== 'ready') return;
+    finalizeSaving = true;
     try {
+      await settleAutosaveBeforeManualSave(autosave, true);
       const db = await getDb();
-      if (invoiceId === null || seqState.status !== 'ready') return;
-      autosave?.cancelPending();
       await saveDraft(db, invoiceId, buildDraft());
       finalized = await finalizeInvoice(db, invoiceId);
       showConfirm = false;
@@ -266,6 +274,8 @@
       void backupNow();
     } catch (e) {
       finalizeError = (e as Error).message;
+    } finally {
+      finalizeSaving = false;
     }
   }
 
@@ -285,6 +295,7 @@
     completed = [];
     noshow = [];
     finalized = null;
+    finalizeSaving = false;
     saveState = 'idle';
     lastSavedJson = JSON.stringify(buildDraft());
     makeAutosave();
@@ -415,12 +426,15 @@
   {/if}
 
   {#if showConfirm && totals}
-    <ConfirmDialog title="Lock &amp; Save this invoice?" confirmLabel="Finalize &amp; Save"
+    <ConfirmDialog title="Lock &amp; Save this invoice?"
+      confirmLabel={finalizeSaving ? 'Saving...' : 'Finalize & Save'}
+      confirmDisabled={finalizeSaving}
       onConfirm={doFinalize} onCancel={() => (showConfirm = false)}>
       <p>{completed.length} completed + {noshow.length} no-shows = {allLines.length} lines</p>
       <p>Subtotal {formatDollars(totals.subtotalCents)} · HST {formatDollars(totals.taxCents)}</p>
       <p style="font-weight:700;font-size:var(--fs-lg)">Total {formatDollars(totals.totalCents)}</p>
       <p style="color:var(--text-secondary)">Once locked, this invoice can't be edited — you can duplicate it to start a new one.</p>
+      {#if finalizeError}<p class="err">Couldn't save: {finalizeError}</p>{/if}
     </ConfirmDialog>
   {/if}
 {/if}

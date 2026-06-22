@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { createAutosaveController, flushPendingAutosave } from './autosave';
+import { createAutosaveController, flushPendingAutosave, settleAutosaveBeforeManualSave } from './autosave';
 
 describe('createAutosaveController', () => {
   afterEach(() => {
@@ -171,5 +171,34 @@ describe('flushPendingAutosave', () => {
     await promise;
 
     expect(flushed).toBe(false);
+  });
+});
+
+describe('settleAutosaveBeforeManualSave', () => {
+  test('waits for autosave flush before canceling pending autosave work', async () => {
+    let releaseFlush!: () => void;
+    const flushPromise = new Promise<void>((resolve) => {
+      releaseFlush = resolve;
+    });
+    const calls: string[] = [];
+
+    const pending = settleAutosaveBeforeManualSave({
+      notifyChanged: () => {},
+      flush: async () => {
+        calls.push('flush-start');
+        await flushPromise;
+        calls.push('flush-done');
+      },
+      cancelPending: () => { calls.push('cancel'); },
+      dispose: () => {},
+    }, true);
+
+    await Promise.resolve();
+    expect(calls).toEqual(['flush-start']);
+
+    releaseFlush();
+    await pending;
+
+    expect(calls).toEqual(['flush-start', 'flush-done', 'cancel']);
   });
 });

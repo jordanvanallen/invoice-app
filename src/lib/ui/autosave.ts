@@ -15,6 +15,14 @@ export function flushPendingAutosave(
   return autosave.flush();
 }
 
+export async function settleAutosaveBeforeManualSave(
+  autosave: AutosaveController | null,
+  canFlush: boolean,
+): Promise<void> {
+  await flushPendingAutosave(autosave, canFlush);
+  autosave?.cancelPending();
+}
+
 interface AutosaveOptions<T> {
   read: () => T;
   serialize: (value: T) => string;
