@@ -7,6 +7,14 @@ export interface AutosaveController {
   dispose(): void;
 }
 
+export function flushPendingAutosave(
+  autosave: AutosaveController | null,
+  canFlush: boolean,
+): Promise<void> | undefined {
+  if (!autosave || !canFlush) return undefined;
+  return autosave.flush();
+}
+
 interface AutosaveOptions<T> {
   read: () => T;
   serialize: (value: T) => string;

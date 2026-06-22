@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { createAutosaveController } from './autosave';
+import { createAutosaveController, flushPendingAutosave } from './autosave';
 
 describe('createAutosaveController', () => {
   afterEach(() => {
@@ -99,5 +99,35 @@ describe('createAutosaveController', () => {
     expect(savedJson).toBe('edited-again');
 
     autosave.dispose();
+  });
+});
+
+describe('flushPendingAutosave', () => {
+  test('returns the flush promise when the current draft can be persisted', async () => {
+    let flushed = false;
+    const promise = flushPendingAutosave({
+      notifyChanged: () => {},
+      flush: async () => { flushed = true; },
+      cancelPending: () => {},
+      dispose: () => {},
+    }, true);
+
+    await promise;
+
+    expect(flushed).toBe(true);
+  });
+
+  test('skips flushing when the current draft cannot be persisted', async () => {
+    let flushed = false;
+    const promise = flushPendingAutosave({
+      notifyChanged: () => {},
+      flush: async () => { flushed = true; },
+      cancelPending: () => {},
+      dispose: () => {},
+    }, false);
+
+    await promise;
+
+    expect(flushed).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { onNavigate } from '$app/navigation';
   import InvoiceSection from '$lib/components/InvoiceSection.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import SaveStatusChip from '$lib/components/SaveStatusChip.svelte';
@@ -23,7 +24,7 @@
   import { formatDollars } from '$lib/money';
   import { bpToPercentInput } from '$lib/ui/format';
   import { canPersistInvoiceSequence, resolveInvoiceSequenceState } from '$lib/ui/invoiceSequence';
-  import { createAutosaveController, type AutosaveController } from '$lib/ui/autosave';
+  import { createAutosaveController, flushPendingAutosave, type AutosaveController } from '$lib/ui/autosave';
   import { handleWindowCloseRequest } from '$lib/ui/windowClose';
   import type { Settings, DraftInvoice, FinalizedSnapshot } from '$lib/types';
   import type { CatalogEntry } from '$lib/db/catalog-repo';
@@ -143,17 +144,13 @@
 
   onDestroy(() => {
     unlisten?.();
-    const pendingAutosave = autosave;
-    autosave = null;
-    if (!pendingAutosave) return;
-    if (!loaded || invoiceId === null || finalized || !canPersistInvoiceSequence(seqState)) {
-      pendingAutosave.dispose();
-      return;
-    }
-    void pendingAutosave.flush().finally(() => {
-      pendingAutosave.dispose();
-    });
+    autosave?.dispose();
   });
+
+  onNavigate(() => flushPendingAutosave(
+    autosave,
+    loaded && invoiceId !== null && !finalized && canPersistInvoiceSequence(seqState),
+  ));
 
   // Debounced autosave: persists 1.5s after a real change. Skips save-on-load and
   // no-op re-saves by comparing against the last persisted snapshot.
