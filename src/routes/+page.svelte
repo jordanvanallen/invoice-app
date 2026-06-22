@@ -143,7 +143,16 @@
 
   onDestroy(() => {
     unlisten?.();
-    autosave?.dispose();
+    const pendingAutosave = autosave;
+    autosave = null;
+    if (!pendingAutosave) return;
+    if (!loaded || invoiceId === null || finalized || !canPersistInvoiceSequence(seqState)) {
+      pendingAutosave.dispose();
+      return;
+    }
+    void pendingAutosave.flush().finally(() => {
+      pendingAutosave.dispose();
+    });
   });
 
   // Debounced autosave: persists 1.5s after a real change. Skips save-on-load and

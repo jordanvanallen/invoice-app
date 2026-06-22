@@ -2,6 +2,7 @@ export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 export interface AutosaveController {
   notifyChanged(): void;
+  flush(): Promise<void>;
   cancelPending(): void;
   dispose(): void;
 }
@@ -80,6 +81,11 @@ export function createAutosaveController<T>({
       const json = serialize(read());
       if (isSaved(json)) return;
       schedule(delayMs, true);
+    },
+    async flush() {
+      clearTimer();
+      const token = ++generation;
+      await run(token);
     },
     cancelPending() {
       clearTimer();

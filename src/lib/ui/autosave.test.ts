@@ -73,4 +73,31 @@ describe('createAutosaveController', () => {
 
     autosave.dispose();
   });
+
+  test('flushes a pending change immediately before teardown', async () => {
+    vi.useFakeTimers();
+    let value = 'edited';
+    let savedJson = '';
+    const savedValues: string[] = [];
+
+    const autosave = createAutosaveController({
+      read: () => value,
+      serialize: (v) => v,
+      isSaved: (json) => json === savedJson,
+      markSaved: (json) => { savedJson = json; },
+      save: async (v) => { savedValues.push(v); },
+      setState: () => {},
+      delayMs: 1500,
+      retryDelayMs: 100,
+    });
+
+    autosave.notifyChanged();
+    value = 'edited-again';
+    await autosave.flush();
+
+    expect(savedValues).toEqual(['edited-again']);
+    expect(savedJson).toBe('edited-again');
+
+    autosave.dispose();
+  });
 });
