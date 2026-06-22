@@ -100,6 +100,48 @@ describe('createAutosaveController', () => {
 
     autosave.dispose();
   });
+
+  test('waits for an in-flight save before flushing the latest snapshot', async () => {
+    vi.useFakeTimers();
+    let value = 'default';
+    let savedJson = '';
+    let releaseFirstSave!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve;
+    });
+    const savedValues: string[] = [];
+
+    const autosave = createAutosaveController({
+      read: () => value,
+      serialize: (v) => v,
+      isSaved: (json) => json === savedJson,
+      markSaved: (json) => { savedJson = json; },
+      save: async (v) => {
+        savedValues.push(v);
+        if (v === 'default') await firstSave;
+      },
+      setState: () => {},
+      delayMs: 25,
+      retryDelayMs: 100,
+    });
+
+    autosave.notifyChanged();
+    await vi.advanceTimersByTimeAsync(25);
+    expect(savedValues).toEqual(['default']);
+
+    value = 'edited';
+    const flushPromise = autosave.flush();
+    await Promise.resolve();
+    expect(savedValues).toEqual(['default']);
+
+    releaseFirstSave();
+    await flushPromise;
+
+    expect(savedValues).toEqual(['default', 'edited']);
+    expect(savedJson).toBe('edited');
+
+    autosave.dispose();
+  });
 });
 
 describe('flushPendingAutosave', () => {

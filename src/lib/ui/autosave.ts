@@ -41,6 +41,7 @@ export function createAutosaveController<T>({
   let timer: ReturnType<typeof setTimeout> | null = null;
   let generation = 0;
   let disposed = false;
+  let saveQueue = Promise.resolve();
 
   function clearTimer() {
     if (timer) {
@@ -73,6 +74,12 @@ export function createAutosaveController<T>({
     }
   }
 
+  function enqueueRun(token: number): Promise<void> {
+    const next = saveQueue.then(() => run(token), () => run(token));
+    saveQueue = next.catch(() => {});
+    return next;
+  }
+
   function schedule(delay: number, showSaving: boolean) {
     if (disposed) return;
     clearTimer();
@@ -80,7 +87,7 @@ export function createAutosaveController<T>({
     const token = ++generation;
     timer = setTimeout(() => {
       timer = null;
-      void run(token);
+      void enqueueRun(token);
     }, delay);
   }
 
@@ -93,7 +100,7 @@ export function createAutosaveController<T>({
     async flush() {
       clearTimer();
       const token = ++generation;
-      await run(token);
+      await enqueueRun(token);
     },
     cancelPending() {
       clearTimer();
