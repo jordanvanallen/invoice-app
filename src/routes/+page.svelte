@@ -16,6 +16,7 @@
   import { formatInvoiceNumber } from '$lib/numbering';
   import { computeTotals } from '$lib/totals';
   import { buildFinalizedSnapshot } from '$lib/snapshot';
+  import { orderInvoiceLines, sortRowsByDate } from '$lib/lineOrder';
   import { defaultInvoicePeriod } from '$lib/ui/date';
   import { saveInvoicePdf } from '$lib/pdf/generate';
   import { showSaveToast } from '$lib/stores/toast';
@@ -267,7 +268,9 @@
     try {
       await settleAutosaveBeforeManualSave(autosave, true);
       const db = await getDb();
-      await saveDraft(db, invoiceId, buildDraft());
+      const draft = buildDraft();
+      draft.lines = orderInvoiceLines(draft.lines);
+      await saveDraft(db, invoiceId, draft);
       finalized = await finalizeInvoice(db, invoiceId);
       showConfirm = false;
       showSaveToast(await saveInvoicePdf(finalized));
@@ -370,6 +373,18 @@
     <p class="empty-hint">Add your inspections below. Tip: after filling a row, press <b>Enter</b> on the Fee to start the next one.</p>
   {/if}
 
+  <div class="row-tools">
+    <button
+      type="button"
+      class="sort-rows"
+      disabled={completed.length < 2 && noshow.length < 2}
+      onclick={() => {
+        completed = sortRowsByDate(completed);
+        noshow = sortRowsByDate(noshow);
+      }}
+    >Sort rows by date</button>
+  </div>
+
   <div class="sections">
     <InvoiceSection
       title="Completed Inspections · {formatDollars(settings.defaultCompletedFeeCents)} each"
@@ -453,6 +468,12 @@
   .period .dates { display: flex; align-items: center; gap: var(--sp-2); }
   .empty-hint { margin: 0 0 var(--sp-4); padding: var(--sp-3) var(--sp-4); background: var(--accent-tint);
     color: var(--text-secondary); border-radius: var(--r-md); font-size: var(--fs-sm); }
+  .row-tools { display: flex; justify-content: flex-end; margin: 0 0 var(--sp-3); }
+  .sort-rows { min-height: var(--target); padding: 0 var(--sp-4); border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm); background: var(--bg-surface); color: var(--accent-strong);
+    font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+  .sort-rows:hover:not(:disabled) { background: var(--accent-tint); }
+  .sort-rows:disabled { color: var(--text-muted); cursor: default; opacity: .65; }
   .sections { display: flex; flex-direction: column; gap: var(--sp-6); padding-bottom: 96px; }
   .dock { position: sticky; bottom: 0; margin: 0 calc(-1 * var(--sp-8)) calc(-1 * var(--sp-8));
     display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); flex-wrap: wrap;
