@@ -13,6 +13,17 @@ export function sortRowsByDate<T extends { date: string }>(rows: readonly T[]): 
     .map(({ row }) => row);
 }
 
+/** Apply the editor's explicit sort action without mixing its two sections. */
+export function sortInvoiceSections<T extends { date: string }>(
+  completed: readonly T[],
+  noshow: readonly T[],
+): { completed: T[]; noshow: T[] } {
+  return {
+    completed: sortRowsByDate(completed),
+    noshow: sortRowsByDate(noshow),
+  };
+}
+
 /** Keep invoice sections separate, sort each one, and assign canonical positions. */
 export function orderInvoiceLines(lines: readonly LineItem[]): LineItem[] {
   const sectionOrder: LineType[] = ['completed', 'noshow'];

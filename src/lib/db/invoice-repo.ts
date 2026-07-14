@@ -1,6 +1,7 @@
 import type { Db } from './db';
 import { runInTransaction } from './db';
 import type { DraftInvoice, LineItem, FinalizedSnapshot } from '../types';
+import { orderInvoiceLines } from '../lineOrder';
 import { buildFinalizedSnapshot } from '../snapshot';
 import { checkOverride } from '../numbering';
 import { getSettings } from './settings-repo';
@@ -112,6 +113,18 @@ export async function saveDraft(
          l.locationId, l.location, l.date, l.vin8, l.mileageCents, l.feeCents],
       );
     }
+  });
+}
+
+/** Persist the canonical row order used immediately before finalization. */
+export async function saveDraftInDateOrder(
+  db: Db,
+  invoiceId: number,
+  draft: SaveableDraft,
+): Promise<void> {
+  await saveDraft(db, invoiceId, {
+    ...draft,
+    lines: orderInvoiceLines(draft.lines),
   });
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { orderInvoiceLines, sortRowsByDate } from './lineOrder';
+import { orderInvoiceLines, sortInvoiceSections, sortRowsByDate } from './lineOrder';
 import type { LineItem, LineType } from './types';
 
 function line(
@@ -63,5 +63,33 @@ describe('orderInvoiceLines', () => {
     expect(ordered.map((row) => row.position)).toEqual([0, 1, 2, 3]);
     expect(lines.map((row) => row.position)).toEqual([8, 3, 6, 2]);
     expect(ordered[0]).not.toBe(lines[2]);
+  });
+});
+
+describe('sortInvoiceSections', () => {
+  test('sorts completed and no-show rows independently without mutating either list', () => {
+    const completed = [
+      line('completed-new', '2026-07-14'),
+      line('completed-old', '2026-07-10'),
+    ];
+    const noshow = [
+      line('noshow-new', '2026-07-13', 'noshow'),
+      line('noshow-old', '2026-07-09', 'noshow'),
+    ];
+
+    const sorted = sortInvoiceSections(completed, noshow);
+
+    expect(sorted.completed.map((row) => row.inspectionNumber)).toEqual([
+      'completed-old', 'completed-new',
+    ]);
+    expect(sorted.noshow.map((row) => row.inspectionNumber)).toEqual([
+      'noshow-old', 'noshow-new',
+    ]);
+    expect(completed.map((row) => row.inspectionNumber)).toEqual([
+      'completed-new', 'completed-old',
+    ]);
+    expect(noshow.map((row) => row.inspectionNumber)).toEqual([
+      'noshow-new', 'noshow-old',
+    ]);
   });
 });

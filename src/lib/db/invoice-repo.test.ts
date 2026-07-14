@@ -2,7 +2,7 @@ import { test, expect, describe } from 'vitest';
 import { createSqlJsDb } from './sqljs-adapter';
 import { runMigrations } from './migrate';
 import { addEntry } from './catalog-repo';
-import { createDraft, loadDraft, saveDraft, finalizeInvoice, reprintSnapshot, listYears, listInvoicesForYear, yearRollup, latestDraftId, duplicateInvoice, yearClientBreakdown, rangeRollup, rangeClientBreakdown, peekNextSeq, voidInvoice, listVoided, unvoidInvoice, searchInvoices, loadBilledHistory, getInvoiceStatus, deleteVoidedInvoice } from './invoice-repo';
+import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, finalizeInvoice, reprintSnapshot, listYears, listInvoicesForYear, yearRollup, latestDraftId, duplicateInvoice, yearClientBreakdown, rangeRollup, rangeClientBreakdown, peekNextSeq, voidInvoice, listVoided, unvoidInvoice, searchInvoices, loadBilledHistory, getInvoiceStatus, deleteVoidedInvoice } from './invoice-repo';
 import { allocateSeq } from './numbering-repo';
 import { getSettings, saveSettings } from './settings-repo';
 import type { LineItem } from '../types';
@@ -70,6 +70,36 @@ describe('invoice draft repo', () => {
     });
 
     expect((await loadDraft(db, id)).lines).toHaveLength(1);
+  });
+
+  test('saveDraftInDateOrder persists separate chronological sections and canonical positions', async () => {
+    const db = await freshDb();
+    const id = await createDraft(db, {
+      year: 2026,
+      issueDate: '2026-07-14',
+      periodStart: '2026-07-01',
+      periodEnd: '2026-07-14',
+    });
+
+    await saveDraftInDateOrder(db, id, {
+      seq: null,
+      year: 2026,
+      issueDate: '2026-07-14',
+      periodStart: '2026-07-01',
+      periodEnd: '2026-07-14',
+      lines: [
+        line({ inspectionNumber: 'completed-new', date: '2026-07-14', position: 8 }),
+        line({ type: 'noshow', inspectionNumber: 'noshow-new', date: '2026-07-13', position: 3 }),
+        line({ inspectionNumber: 'completed-old', date: '2026-07-01', position: 6 }),
+        line({ type: 'noshow', inspectionNumber: 'noshow-old', date: '2026-07-02', position: 2 }),
+      ],
+    });
+
+    const saved = await loadDraft(db, id);
+    expect(saved.lines.map((row) => row.inspectionNumber)).toEqual([
+      'completed-old', 'completed-new', 'noshow-old', 'noshow-new',
+    ]);
+    expect(saved.lines.map((row) => row.position)).toEqual([0, 1, 2, 3]);
   });
 
   test('a linked client name resolves LIVE — renaming the client updates an open draft', async () => {

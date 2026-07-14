@@ -11,12 +11,12 @@
   import { loadSettings } from '$lib/stores/settings';
   import { loadClients, loadLocations, addClient as addClientDb, addLocation as addLocationDb } from '$lib/stores/catalog';
   import { getDb } from '$lib/db';
-  import { createDraft, loadDraft, saveDraft, latestDraftId, finalizeInvoice, peekNextSeq, loadBilledHistory, type BilledHistory } from '$lib/db/invoice-repo';
+  import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, latestDraftId, finalizeInvoice, peekNextSeq, loadBilledHistory, type BilledHistory } from '$lib/db/invoice-repo';
   import { takenSeqs } from '$lib/db/numbering-repo';
   import { formatInvoiceNumber } from '$lib/numbering';
   import { computeTotals } from '$lib/totals';
   import { buildFinalizedSnapshot } from '$lib/snapshot';
-  import { orderInvoiceLines, sortRowsByDate } from '$lib/lineOrder';
+  import { sortInvoiceSections } from '$lib/lineOrder';
   import { defaultInvoicePeriod } from '$lib/ui/date';
   import { saveInvoicePdf } from '$lib/pdf/generate';
   import { showSaveToast } from '$lib/stores/toast';
@@ -268,9 +268,7 @@
     try {
       await settleAutosaveBeforeManualSave(autosave, true);
       const db = await getDb();
-      const draft = buildDraft();
-      draft.lines = orderInvoiceLines(draft.lines);
-      await saveDraft(db, invoiceId, draft);
+      await saveDraftInDateOrder(db, invoiceId, buildDraft());
       finalized = await finalizeInvoice(db, invoiceId);
       showConfirm = false;
       showSaveToast(await saveInvoicePdf(finalized));
@@ -379,8 +377,9 @@
       class="sort-rows"
       disabled={completed.length < 2 && noshow.length < 2}
       onclick={() => {
-        completed = sortRowsByDate(completed);
-        noshow = sortRowsByDate(noshow);
+        const sorted = sortInvoiceSections(completed, noshow);
+        completed = sorted.completed;
+        noshow = sorted.noshow;
       }}
     >Sort rows by date</button>
   </div>
