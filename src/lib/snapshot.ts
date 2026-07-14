@@ -1,4 +1,5 @@
 import type { DraftInvoice, FinalizedSnapshot, Settings } from './types';
+import { orderInvoiceLines } from './lineOrder';
 import { computeTotals } from './totals';
 import { formatInvoiceNumber } from './numbering';
 
@@ -12,7 +13,7 @@ export function buildFinalizedSnapshot(
   settings: Settings,
   seq: number,
 ): FinalizedSnapshot {
-  const lines = draft.lines.map((l) => ({ ...l }));
+  const lines = orderInvoiceLines(draft.lines);
   const totals = computeTotals(lines, settings.taxRateBp);
 
   return {

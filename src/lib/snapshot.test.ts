@@ -62,4 +62,24 @@ describe('buildFinalizedSnapshot', () => {
     expect(fresh.lines[0].clientName).toBe('Acme Lease Corp');
     expect(fresh.totals.subtotalCents).toBe(3800);
   });
+
+  test('orders each invoice section by date without mutating the draft', () => {
+    const source = draft();
+    source.lines = [
+      { ...completed(), inspectionNumber: 'completed-new', date: '2026-05-27', position: 0 },
+      { ...completed(), type: 'noshow', inspectionNumber: 'noshow-new', date: '2026-05-26', position: 1 },
+      { ...completed(), inspectionNumber: 'completed-old', date: '2026-05-21', position: 2 },
+      { ...completed(), type: 'noshow', inspectionNumber: 'noshow-old', date: '2026-05-20', position: 3 },
+    ];
+
+    const snap = buildFinalizedSnapshot(source, settings(), 8);
+
+    expect(snap.lines.map((line) => line.inspectionNumber)).toEqual([
+      'completed-old', 'completed-new', 'noshow-old', 'noshow-new',
+    ]);
+    expect(snap.lines.map((line) => line.position)).toEqual([0, 1, 2, 3]);
+    expect(source.lines.map((line) => line.inspectionNumber)).toEqual([
+      'completed-new', 'noshow-new', 'completed-old', 'noshow-old',
+    ]);
+  });
 });

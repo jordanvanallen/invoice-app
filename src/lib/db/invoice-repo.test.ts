@@ -106,6 +106,37 @@ describe('finalize + reprint', () => {
     expect(row.total_cents).toBe(4294);
   });
 
+  test('finalize stores a date-ordered snapshot that reprints identically', async () => {
+    const db = await freshDb();
+    const id = await createDraft(db, {
+      year: 2026,
+      issueDate: '2026-07-14',
+      periodStart: '2026-07-01',
+      periodEnd: '2026-07-14',
+    });
+    await saveDraft(db, id, {
+      seq: null,
+      year: 2026,
+      issueDate: '2026-07-14',
+      periodStart: '2026-07-01',
+      periodEnd: '2026-07-14',
+      lines: [
+        line({ inspectionNumber: 'completed-new', date: '2026-07-14', position: 0 }),
+        line({ type: 'noshow', inspectionNumber: 'noshow-new', date: '2026-07-13', position: 1 }),
+        line({ inspectionNumber: 'completed-old', date: '2026-07-01', position: 2 }),
+        line({ type: 'noshow', inspectionNumber: 'noshow-old', date: '2026-07-02', position: 3 }),
+      ],
+    });
+
+    const finalized = await finalizeInvoice(db, id);
+    const reprinted = await reprintSnapshot(db, id);
+
+    expect(finalized.lines.map((row) => row.inspectionNumber)).toEqual([
+      'completed-old', 'completed-new', 'noshow-old', 'noshow-new',
+    ]);
+    expect(reprinted.lines).toEqual(finalized.lines);
+  });
+
   test('finalizeInvoice works on adapters that do not support raw transaction commands', async () => {
     const base = await freshDb();
     const db = withoutSqlTransactions(base);
