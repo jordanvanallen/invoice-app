@@ -7,6 +7,7 @@ node_modules
 /package
 dist/
 src-tauri/target/
+/.worktrees/
 
 # Env
 .env
