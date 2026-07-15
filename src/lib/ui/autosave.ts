@@ -138,6 +138,7 @@ export function createAutosaveController<T>({
       clearTimer();
       generation += 1;
       cancelVersion += 1;
+      flushInFlight = null;
     },
     dispose() {
       disposed = true;

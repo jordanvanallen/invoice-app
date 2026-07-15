@@ -186,6 +186,48 @@ describe('createAutosaveController', () => {
     expect(savedJson).toBe('preview-sorted');
     autosave.dispose();
   });
+
+  test('starts a successor flush after canceling an active drain', async () => {
+    let value = 'before-cancel';
+    let savedJson = '';
+    let releaseFirstSave!: () => void;
+    let markFirstSaveStarted!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve;
+    });
+    const firstSaveStarted = new Promise<void>((resolve) => {
+      markFirstSaveStarted = resolve;
+    });
+    const savedValues: string[] = [];
+    const autosave = createAutosaveController({
+      read: () => value,
+      serialize: (current) => current,
+      isSaved: (json) => json === savedJson,
+      markSaved: (json) => { savedJson = json; },
+      save: async (current) => {
+        savedValues.push(current);
+        if (current === 'before-cancel') {
+          markFirstSaveStarted();
+          await firstSave;
+        }
+      },
+      setState: () => {},
+    });
+
+    const canceledFlush = autosave.flush();
+    await firstSaveStarted;
+    autosave.cancelPending();
+    value = 'after-cancel';
+    const successorFlush = autosave.flush();
+
+    expect(successorFlush).not.toBe(canceledFlush);
+    releaseFirstSave();
+    await Promise.all([canceledFlush, successorFlush]);
+
+    expect(savedValues).toEqual(['before-cancel', 'after-cancel']);
+    expect(savedJson).toBe('after-cancel');
+    autosave.dispose();
+  });
 });
 
 describe('flushPendingAutosave', () => {
