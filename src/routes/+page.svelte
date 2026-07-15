@@ -37,7 +37,7 @@
     settleAutosaveBeforeManualSave,
     type AutosaveController,
   } from '$lib/ui/autosave';
-  import { handleWindowCloseRequest } from '$lib/ui/windowClose';
+  import { handleAutosavingWindowCloseRequest } from '$lib/ui/windowClose';
   import type { Settings, DraftInvoice, FinalizedSnapshot } from '$lib/types';
   import type { CatalogEntry } from '$lib/db/catalog-repo';
   import { toEditorRow, type EditorRow } from '$lib/ui/editorRow';
@@ -142,12 +142,9 @@
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       const w = getCurrentWindow();
       unlisten = await w.onCloseRequested(async (event) => {
-        await handleWindowCloseRequest(event, {
-          save: async () => {
-            if (invoiceId !== null && canPersistInvoiceSequence(seqState)) {
-              await saveDraft(await getDb(), invoiceId, buildDraft());
-            }
-          },
+        await handleAutosavingWindowCloseRequest(event, {
+          autosave,
+          canFlush: invoiceId !== null && canPersistInvoiceSequence(seqState),
           destroy: () => w.destroy(),
           exit: async (code) => {
             const { exit } = await import('@tauri-apps/plugin-process');

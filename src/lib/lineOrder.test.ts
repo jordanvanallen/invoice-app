@@ -44,6 +44,21 @@ describe('sortRowsByDate', () => {
     ]);
     expect(sorted).not.toBe(rows);
   });
+
+  test('sorts chronologically across month and year boundaries', () => {
+    const rows = [
+      line('october', '2026-10-01'),
+      line('new-year', '2026-01-01'),
+      line('previous-year', '2025-12-31'),
+      line('february', '2026-02-01'),
+    ];
+
+    const sorted = sortRowsByDate(rows);
+
+    expect(sorted.map((row) => row.inspectionNumber)).toEqual([
+      'previous-year', 'new-year', 'february', 'october',
+    ]);
+  });
 });
 
 describe('orderInvoiceLines', () => {

@@ -4,7 +4,7 @@
 
 **Goal:** Make Preview sort the visible Completed and No-Show editor sections before rendering so closing Preview returns to the same order the user reviewed.
 
-**Architecture:** Reuse the existing tested `sortInvoiceSections()` helper through one Svelte `sortInvoiceRows()` function shared by the manual sort button and `openPreview()`. A source-contract regression test verifies that Preview invokes this function before snapshot construction; the existing unit, database, snapshot, Svelte, and build checks cover the underlying behavior and integration boundaries.
+**Architecture:** Reuse the existing tested `sortInvoiceSections()` helper through one Svelte `sortInvoiceRows()` function shared by the manual sort button and `openPreview()`. Route Preview through a small synchronous `prepareInvoicePreview()` seam that calls the editor sort action before snapshot construction. A behavioral test executes that transition and confirms the retained editor arrays match the snapshot, while a source-contract test protects the Svelte wiring; the existing unit, database, snapshot, Svelte, and build checks cover the surrounding behavior and integration boundaries.
 
 **Tech Stack:** TypeScript 5.6, Svelte 5 runes, SvelteKit 2, Vitest 4.
 
@@ -22,6 +22,8 @@
 
 ## File Structure
 
+- Create `src/lib/ui/preview.ts`: execute the sort action before building the Preview snapshot.
+- Create `src/lib/ui/preview.test.ts`: behaviorally verify the editor and snapshot retain the same sorted section order.
 - Create `src/lib/ui/previewSortContract.test.ts`: assert the Svelte Preview handler sorts visible rows before snapshot construction.
 - Modify `src/routes/+page.svelte`: share one explicit editor-sort function between the button and Preview.
 - Modify `USER_GUIDE.md`: explain that Preview leaves the editor matching the reviewed order.
@@ -29,58 +31,30 @@
 ### Task 1: Align Preview and Editor Order
 
 **Files:**
+- Create: `src/lib/ui/preview.ts`
+- Create: `src/lib/ui/preview.test.ts`
 - Create: `src/lib/ui/previewSortContract.test.ts`
 - Modify: `src/routes/+page.svelte`
 - Modify: `USER_GUIDE.md`
 
 **Interfaces:**
 - Consumes: `sortInvoiceSections<T extends { date: string }>(completed, noshow)` from `src/lib/lineOrder.ts`.
-- Produces: `sortInvoiceRows(): void`, used by both the manual sort button and `openPreview()`.
+- Produces: `sortInvoiceRows(): void`, used by the manual sort button and supplied to Preview.
+- Produces: `prepareInvoicePreview<T>({ sortRows, buildSnapshot }): T`, which guarantees synchronous sort-before-snapshot sequencing.
 
-- [ ] **Step 1: Write the failing Preview ordering contract test**
+- [ ] **Step 1: Write the failing Preview behavioral and wiring tests**
 
-Create `src/lib/ui/previewSortContract.test.ts`:
-
-```ts
-import { describe, expect, test } from 'vitest';
-import { readFileSync } from 'node:fs';
-
-describe('invoice Preview sorting contract', () => {
-  test('sorts visible editor rows before building the Preview snapshot', () => {
-    const page = readFileSync('src/routes/+page.svelte', 'utf8');
-    const sortStart = page.indexOf('function sortInvoiceRows()');
-    const sortEnd = page.indexOf('\n  }', sortStart);
-    const previewStart = page.indexOf('async function openPreview()');
-    const previewEnd = page.indexOf('\n  }', previewStart);
-
-    expect(sortStart).toBeGreaterThan(-1);
-    expect(previewStart).toBeGreaterThan(-1);
-
-    const sortHandler = page.slice(sortStart, sortEnd);
-    const previewHandler = page.slice(previewStart, previewEnd);
-    const sortCall = previewHandler.indexOf('sortInvoiceRows();');
-    const snapshotCall = previewHandler.indexOf('previewSnap = buildFinalizedSnapshot');
-
-    expect(sortHandler).toContain('sortInvoiceSections(completed, noshow)');
-    expect(sortHandler).toContain('completed = sorted.completed');
-    expect(sortHandler).toContain('noshow = sorted.noshow');
-    expect(sortCall).toBeGreaterThan(-1);
-    expect(snapshotCall).toBeGreaterThan(-1);
-    expect(sortCall).toBeLessThan(snapshotCall);
-    expect(page).toContain('onclick={sortInvoiceRows}');
-  });
-});
-```
+Create `src/lib/ui/preview.test.ts` to execute the transition with unsorted Completed and No-Show rows and assert that the returned snapshot and retained editor arrays contain the same sorted order. Create `src/lib/ui/previewSortContract.test.ts` to verify that the Svelte page supplies `sortInvoiceRows` and its draft snapshot builder to `prepareInvoicePreview`, and that the manual button uses the same sort action.
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
 Run:
 
 ```bash
-npm test -- src/lib/ui/previewSortContract.test.ts
+npm test -- src/lib/ui/preview.test.ts src/lib/ui/previewSortContract.test.ts
 ```
 
-Expected: FAIL because `sortInvoiceRows()` does not exist and `openPreview()` does not sort the visible editor before snapshot construction.
+Expected: FAIL because `prepareInvoicePreview()` and the shared Svelte Preview wiring do not exist.
 
 - [ ] **Step 3: Share the explicit editor sort between the button and Preview**
 
@@ -94,14 +68,35 @@ In `src/routes/+page.svelte`, add this function after `buildDraft()`:
   }
 ```
 
-In `openPreview()`, call it after the readiness guards and before snapshot construction:
+Create `src/lib/ui/preview.ts`:
+
+```ts
+export type PreviewPreparation<T> = {
+  sortRows: () => void;
+  buildSnapshot: () => T;
+};
+
+export function prepareInvoicePreview<T>({
+  sortRows,
+  buildSnapshot,
+}: PreviewPreparation<T>): T {
+  sortRows();
+  return buildSnapshot();
+}
+```
+
+In `openPreview()`, capture the click-time settings and sequence, then pass the shared sort action and snapshot builder through the tested transition:
 
 ```ts
   async function openPreview() {
-    if (!settings) return;
-    if (seqState.status !== 'ready' || seqState.draftSeq === null) return;
-    sortInvoiceRows();
-    previewSnap = buildFinalizedSnapshot(buildDraft(), settings, seqState.draftSeq);
+    const currentSettings = settings;
+    const draftSeq = seqState.draftSeq;
+    if (!currentSettings) return;
+    if (seqState.status !== 'ready' || draftSeq === null) return;
+    previewSnap = prepareInvoicePreview({
+      sortRows: sortInvoiceRows,
+      buildSnapshot: () => buildFinalizedSnapshot(buildDraft(), currentSettings, draftSeq),
+    });
     showPreview = true;
   }
 ```
@@ -125,10 +120,10 @@ Rows stay exactly where they are while you type. When you are ready, click **Sor
 Run:
 
 ```bash
-npm test -- src/lib/ui/previewSortContract.test.ts
+npm test -- src/lib/ui/preview.test.ts src/lib/ui/previewSortContract.test.ts
 ```
 
-Expected: 1 test passes.
+Expected: both focused tests pass.
 
 - [ ] **Step 6: Run full verification**
 
@@ -145,7 +140,7 @@ Expected: all tests pass, Svelte reports 0 errors and 0 warnings, and the produc
 - [ ] **Step 7: Commit the behavior revision**
 
 ```bash
-git add src/lib/ui/previewSortContract.test.ts src/routes/+page.svelte USER_GUIDE.md
+git add src/lib/ui/preview.ts src/lib/ui/preview.test.ts src/lib/ui/previewSortContract.test.ts src/routes/+page.svelte USER_GUIDE.md
 git commit -m "Keep invoice editor aligned with preview"
 ```
 
@@ -197,7 +192,7 @@ Expected: no whitespace errors, all tests pass, Svelte reports 0 errors and 0 wa
 
 ## Plan Self-Review
 
-- Spec coverage: Task 1 covers the visible Preview/editor order, shared control path, regression test, and user documentation; Task 2 covers repeated review and final verification.
+- Spec coverage: Task 1 covers the visible Preview/editor order, shared control path, behavioral transition test, Svelte wiring contract, and user documentation; Task 2 covers repeated review and final verification.
 - Completeness scan: no unresolved markers, deferred implementation text, or undefined interfaces remain.
 - Type consistency: `EditorRow` satisfies the existing generic `sortInvoiceSections<T extends { date: string }>` contract, and the Svelte assignments preserve `EditorRow[]` types.
 - Scope: no live sorting, schema change, new dependency, drag-and-drop behavior, or unrelated refactor is included.

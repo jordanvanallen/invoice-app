@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { handleWindowCloseRequest } from './windowClose';
+import { createAutosaveController } from './autosave';
+import { handleAutosavingWindowCloseRequest, handleWindowCloseRequest } from './windowClose';
 
 function closeEvent() {
   return { preventDefault: vi.fn() };
@@ -74,5 +75,53 @@ describe('handleWindowCloseRequest', () => {
     await closing;
 
     expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  test('queues the latest draft behind an in-flight autosave before closing', async () => {
+    vi.useFakeTimers();
+    let draft = 'unsorted';
+    let savedDraft = '';
+    let releaseFirstSave!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve;
+    });
+    const savedDrafts: string[] = [];
+    const autosave = createAutosaveController({
+      read: () => draft,
+      serialize: (value) => value,
+      isSaved: (json) => json === savedDraft,
+      markSaved: (json) => { savedDraft = json; },
+      save: async (value) => {
+        savedDrafts.push(value);
+        if (value === 'unsorted') await firstSave;
+      },
+      setState: () => {},
+      delayMs: 25,
+    });
+
+    autosave.notifyChanged();
+    await vi.advanceTimersByTimeAsync(25);
+    expect(savedDrafts).toEqual(['unsorted']);
+
+    draft = 'preview-sorted';
+    const destroy = vi.fn(async () => {});
+    const closing = handleAutosavingWindowCloseRequest(closeEvent(), {
+      autosave,
+      canFlush: true,
+      destroy,
+      saveTimeoutMs: 1_000,
+    });
+    await Promise.resolve();
+
+    expect(savedDrafts).toEqual(['unsorted']);
+    expect(destroy).not.toHaveBeenCalled();
+
+    releaseFirstSave();
+    await closing;
+
+    expect(savedDrafts).toEqual(['unsorted', 'preview-sorted']);
+    expect(savedDraft).toBe('preview-sorted');
+    expect(destroy).toHaveBeenCalledOnce();
+    autosave.dispose();
   });
 });

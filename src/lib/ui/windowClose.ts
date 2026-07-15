@@ -1,3 +1,5 @@
+import { flushPendingAutosave, type AutosaveController } from './autosave';
+
 interface CloseEventLike {
   preventDefault(): void;
 }
@@ -9,6 +11,11 @@ interface WindowCloseOptions {
   saveTimeoutMs?: number;
   destroyTimeoutMs?: number;
 }
+
+type AutosavingWindowCloseOptions = Omit<WindowCloseOptions, 'save'> & {
+  autosave: AutosaveController | null;
+  canFlush: boolean;
+};
 
 function timeout(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -32,4 +39,16 @@ export async function handleWindowCloseRequest(
   if (!destroyed) {
     await exit?.(0);
   }
+}
+
+export async function handleAutosavingWindowCloseRequest(
+  event: CloseEventLike,
+  { autosave, canFlush, ...closeOptions }: AutosavingWindowCloseOptions,
+): Promise<void> {
+  await handleWindowCloseRequest(event, {
+    ...closeOptions,
+    save: async () => {
+      await flushPendingAutosave(autosave, canFlush);
+    },
+  });
 }
