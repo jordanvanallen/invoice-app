@@ -13,7 +13,7 @@
 - Do not modify shipped migrations 1-3; append schema version 4.
 - Store monetary values only as integer cents and require finalized item amounts greater than zero.
 - Keep invoice and expense tables, counters, history, and snapshots independent.
-- Never sort live while the user types. Manual sort changes the editor; Preview sorts only a snapshot; finalization persists canonical order.
+- Never sort live while the user types. Manual sort and Preview retain sorted editor rows; finalization persists canonical order.
 - Preserve equal-date order, place blank dates last, and never mutate ordering inputs.
 - Finalization, duplication, cancel, restore, and delete operations must reject invalid status transitions and repeated UI clicks.
 - A finalized snapshot is the sole source for display and PDF reprints.
@@ -186,7 +186,7 @@ expect(await userVersion(db)).toBe(4);
 - `expenseEditor.ts` supplies pure Preview snapshot preparation and first-blocker targeting data.
 - The route reopens/creates one draft, uses `createAutosaveController`, and calls repository/PDF/backup boundaries.
 
-- [x] **Step 1: Add failing tests for sequence parsing, deliberate override retention across year changes, Preview sorting without editor mutation, and first blocker selection**
+- [x] **Step 1: Add failing tests for sequence parsing, deliberate override retention across year changes, immutable snapshot preparation, retained Preview sorting, and first blocker selection**
 
 - [x] **Step 2: Run the focused UI helper tests and confirm RED**
 
@@ -229,7 +229,7 @@ expect(await userVersion(db)).toBe(4);
 
 - [x] **Step 6: Run focused route tests, all expense tests, and `npm run check` GREEN**
 
-- [ ] **Step 7: Commit Task 6 as `Add expense history and lifecycle screens`**
+- [x] **Step 7: Commit Task 6 as `Add expense history and lifecycle screens`**
 
 ### Task 7: Review Loop and Merge Gate
 
@@ -240,15 +240,15 @@ expect(await userVersion(db)).toBe(4);
 **Interfaces:**
 - Produces a review-clean feature branch ready for local fast-forward or merge into `dev`.
 
-- [ ] **Step 1: Review correctness and regression risk across domain, transaction boundaries, statuses, numbering, and rollback behavior**
+- [x] **Step 1: Review correctness and regression risk across domain, transaction boundaries, statuses, numbering, and rollback behavior**
 
-- [ ] **Step 2: Review usability and accessibility for large controls, labels, keyboard flow, focus-to-blocker, errors, confirmation wording, and non-moving rows**
+- [x] **Step 2: Review usability and accessibility for large controls, labels, keyboard flow, focus-to-blocker, errors, confirmation wording, and non-moving rows**
 
-- [ ] **Step 3: Review migration/restore compatibility and immutable snapshot/PDF reprint guarantees**
+- [x] **Step 3: Review migration/restore compatibility and immutable snapshot/PDF reprint guarantees**
 
-- [ ] **Step 4: Render representative PDFs and visually inspect logo, long descriptions, totals, page breaks, and chronological order**
+- [x] **Step 4: Render representative PDFs and visually inspect logo, long descriptions, totals, page breaks, and chronological order**
 
-- [ ] **Step 5: For every substantive finding, add a failing regression test, confirm RED, apply the smallest fix, and confirm GREEN**
+- [x] **Step 5: For every substantive finding, add a failing regression test, confirm RED, apply the smallest fix, and confirm GREEN**
 
 - [ ] **Step 6: Repeat review until no Critical or Important findings remain**
 

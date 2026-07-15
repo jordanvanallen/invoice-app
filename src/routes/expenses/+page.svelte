@@ -230,6 +230,7 @@
   let previewSnapshot = $state<ExpenseSnapshot | null>(null);
   function openPreview() {
     if (!settings || sequenceState.status !== 'ready' || sequenceState.draftSeq === null) return;
+    sortExpenseRows();
     previewSnapshot = prepareExpensePreview(buildDraft(), settings, sequenceState.draftSeq);
     showPreview = true;
   }
@@ -381,7 +382,7 @@
   {#if showPreview && previewSnapshot}
     <div class="preview-overlay" role="dialog" aria-label="Expense report preview" aria-modal="true">
       <div class="preview-bar">
-        <span>Preview - not saved yet. Rows are shown in date order.</span>
+        <span>Preview - not locked yet. The editor now matches this date order.</span>
         <button class="secondary-button" onclick={() => (showPreview = false)}>Close preview</button>
       </div>
       <div class="preview-body"><ExpenseView snap={previewSnapshot} /></div>

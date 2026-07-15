@@ -2,7 +2,7 @@ import { test, expect, describe } from 'vitest';
 import { createSqlJsDb } from './sqljs-adapter';
 import { runMigrations } from './migrate';
 import { MIGRATIONS } from './schema';
-import type { Db, DbResult } from './db';
+import { runInTransaction, type Db, type DbResult, type DbStatement } from './db';
 
 function withoutSqlTransactions(db: Db): Db {
   return {
@@ -105,5 +105,27 @@ describe('runMigrations', () => {
     await expect(runMigrations(db)).resolves.toBe(4);
     const s = await db.select<{ id: number }>('SELECT id FROM settings');
     expect(s).toEqual([{ id: 1 }]);
+  });
+
+  test('uses the adapter atomic batch for every production migration', async () => {
+    const inner = await createSqlJsDb();
+    let batches = 0;
+    const db: Db = {
+      execute: inner.execute.bind(inner),
+      select: inner.select.bind(inner),
+      async executeTransaction(statements: DbStatement[]) {
+        batches += 1;
+        await runInTransaction(inner, async () => {
+          for (const statement of statements) {
+            await inner.execute(statement.sql, statement.params ?? []);
+          }
+        });
+      },
+    };
+
+    await runMigrations(db);
+
+    expect(batches).toBe(MIGRATIONS.length);
+    expect((await inner.select<{ user_version: number }>('PRAGMA user_version'))[0].user_version).toBe(4);
   });
 });

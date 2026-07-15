@@ -221,4 +221,19 @@ describe('expense history and lifecycle', () => {
     expect(await getExpenseStatus(db, id)).toBeNull();
     expect(await peekNextExpenseSeq(db, 2026)).toBe(9);
   });
+
+  test('does not report success when a lifecycle status update loses a race', async () => {
+    const db = await freshDb();
+    const id = await finalized(db, { seq: 9 });
+    const noUpdateDb: Db = {
+      select: db.select.bind(db),
+      execute: async (sql, params) => {
+        if (sql.includes("SET status = 'void'")) return { rowsAffected: 0 };
+        return db.execute(sql, params);
+      },
+    };
+
+    await expect(voidExpenseReport(noUpdateDb, id)).rejects.toThrow(/changed before it could be cancelled/i);
+    expect(await getExpenseStatus(db, id)).toBe('finalized');
+  });
 });

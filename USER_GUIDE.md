@@ -104,7 +104,7 @@ Once locked, the invoice becomes a permanent record. You can always reprint it f
 1. Open **Expense Reports** from the left menu. The latest unfinished report opens automatically and autosaves as you work.
 2. Check the **report number**, **report date**, and **reporting period** at the top.
 3. Fill in each row's **Date**, **Description**, and **Amount**. Use **+ Add an expense** for another row or **Remove** to delete one.
-4. Rows stay still while you type. Click **Sort rows by date** when you want to arrange them, or use **Preview** to see a date-sorted copy without changing the editor.
+4. Rows stay still while you type. Click **Sort rows by date** when you want to arrange them. Opening **Preview** also sorts the editor first, so closing Preview returns to the same order you reviewed.
 5. Click **Lock & Save** when every row is complete. The app sorts the saved report by date, creates its PDF, and backs up your data.
 
 Locked expense reports cannot be edited. Open **Expense History** to view or save the PDF again, duplicate one into a new editable draft, or cancel and restore a report. Cancelled expense reports are kept in a separate **Cancelled expense reports** section and do not count in yearly expense totals.

@@ -347,10 +347,13 @@ export async function voidExpenseReport(db: Db, id: number): Promise<void> {
   if (status !== 'finalized') {
     throw new Error(`Expense report ${id} is ${status ?? 'missing'}, not finalized.`);
   }
-  await db.execute(
+  const result = await db.execute(
     "UPDATE expense_reports SET status = 'void' WHERE id = ? AND status = 'finalized'",
     [id],
   );
+  if (result.rowsAffected !== 1) {
+    throw new Error(`Expense report ${id} changed before it could be cancelled. Please refresh and try again.`);
+  }
 }
 
 export async function restoreExpenseReport(db: Db, id: number): Promise<void> {
@@ -358,10 +361,13 @@ export async function restoreExpenseReport(db: Db, id: number): Promise<void> {
   if (status !== 'void') {
     throw new Error(`Expense report ${id} is ${status ?? 'missing'}, not void.`);
   }
-  await db.execute(
+  const result = await db.execute(
     "UPDATE expense_reports SET status = 'finalized' WHERE id = ? AND status = 'void'",
     [id],
   );
+  if (result.rowsAffected !== 1) {
+    throw new Error(`Expense report ${id} changed before it could be restored. Please refresh and try again.`);
+  }
 }
 
 export async function deleteVoidedExpenseReport(db: Db, id: number): Promise<boolean> {

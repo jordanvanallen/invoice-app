@@ -1,11 +1,11 @@
 import type { Db } from './db';
-import { runInTransaction } from './db';
+import { executeStatementsAtomically } from './db';
 import { MIGRATIONS } from './schema';
 
 /**
- * Apply any migrations newer than the DB's current user_version. Adapters that
- * expose sticky transactions run each migration atomically; Tauri SQL runs the
- * statements in SQLite autocommit mode because its JS API is backed by a pool.
+ * Apply any migrations newer than the DB's current user_version. Production and
+ * sticky test adapters run each migration atomically. Minimal legacy adapters
+ * without transaction support retain the sequential compatibility fallback.
  * Returns the resulting version. Idempotent: already-applied versions are skipped.
  */
 export async function runMigrations(db: Db): Promise<number> {
@@ -14,12 +14,18 @@ export async function runMigrations(db: Db): Promise<number> {
 
   for (const migration of MIGRATIONS) {
     if (migration.version <= current) continue;
-    await runInTransaction(db, async () => {
+    const statements = [
+      ...migration.statements.map((sql) => ({ sql })),
+      { sql: `PRAGMA user_version = ${migration.version}` },
+    ];
+    if (db.executeTransaction || db.supportsSqlTransactions) {
+      await executeStatementsAtomically(db, statements);
+    } else {
       for (const stmt of migration.statements) {
         await db.execute(stmt);
       }
       await db.execute(`PRAGMA user_version = ${migration.version}`);
-    });
+    }
     current = migration.version;
   }
   return current;

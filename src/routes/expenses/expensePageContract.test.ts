@@ -17,4 +17,17 @@ describe('expense report editor route', () => {
     expect(page).toContain('settleAutosaveBeforeManualSave');
     expect(page).toContain('finalizeExpenseReport');
   });
+
+  test('sorts the visible editor rows before building Preview', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const previewStart = page.indexOf('function openPreview()');
+    const previewEnd = page.indexOf('\n  }', previewStart);
+    const previewHandler = page.slice(previewStart, previewEnd);
+
+    expect(previewStart).toBeGreaterThan(-1);
+    expect(previewHandler.indexOf('sortExpenseRows();')).toBeGreaterThan(-1);
+    expect(previewHandler.indexOf('sortExpenseRows();')).toBeLessThan(
+      previewHandler.indexOf('prepareExpensePreview('),
+    );
+  });
 });

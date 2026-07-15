@@ -53,8 +53,9 @@
   }
 
   function downloadPdf() {
-    if (!snap) return;
-    return runAction('pdf', async () => { showSaveToast(await saveExpensePdf(snap as ExpenseSnapshot)); });
+    const current = snap;
+    if (!current) return;
+    return runAction('pdf', async () => { showSaveToast(await saveExpensePdf(current)); });
   }
 
   function duplicate() {
