@@ -250,9 +250,9 @@ expect(await userVersion(db)).toBe(4);
 
 - [x] **Step 5: For every substantive finding, add a failing regression test, confirm RED, apply the smallest fix, and confirm GREEN**
 
-- [ ] **Step 6: Repeat review until no Critical or Important findings remain**
+- [x] **Step 6: Repeat review until no Critical or Important findings remain**
 
-- [ ] **Step 7: Run the final gate**
+- [x] **Step 7: Run the final gate**
 
 ```bash
 git diff --check dev..HEAD
