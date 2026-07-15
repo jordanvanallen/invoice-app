@@ -18,6 +18,7 @@
   import { buildFinalizedSnapshot } from '$lib/snapshot';
   import { sortInvoiceSections } from '$lib/lineOrder';
   import { defaultInvoicePeriod } from '$lib/ui/date';
+  import { prepareInvoicePreview } from '$lib/ui/preview';
   import { saveInvoicePdf } from '$lib/pdf/generate';
   import { showSaveToast } from '$lib/stores/toast';
   import { backupNow } from '$lib/stores/backup';
@@ -244,10 +245,14 @@
   let showPreview = $state(false);
   let previewSnap = $state<FinalizedSnapshot | null>(null);
   async function openPreview() {
-    if (!settings) return;
-    if (seqState.status !== 'ready' || seqState.draftSeq === null) return;
-    sortInvoiceRows();
-    previewSnap = buildFinalizedSnapshot(buildDraft(), settings, seqState.draftSeq);
+    const currentSettings = settings;
+    const draftSeq = seqState.draftSeq;
+    if (!currentSettings) return;
+    if (seqState.status !== 'ready' || draftSeq === null) return;
+    previewSnap = prepareInvoicePreview({
+      sortRows: sortInvoiceRows,
+      buildSnapshot: () => buildFinalizedSnapshot(buildDraft(), currentSettings, draftSeq),
+    });
     showPreview = true;
   }
 
