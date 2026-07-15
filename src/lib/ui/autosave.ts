@@ -48,6 +48,9 @@ export function createAutosaveController<T>({
 }: AutosaveOptions<T>): AutosaveController {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let generation = 0;
+  let changeVersion = 0;
+  let flushRequestVersion = 0;
+  let cancelVersion = 0;
   let disposed = false;
   let saveQueue = Promise.resolve();
   let flushInFlight: Promise<void> | null = null;
@@ -104,14 +107,28 @@ export function createAutosaveController<T>({
     notifyChanged() {
       const json = serialize(read());
       if (isSaved(json)) return;
+      changeVersion += 1;
       schedule(delayMs, true);
     },
     flush() {
       clearTimer();
+      flushRequestVersion += 1;
       if (flushInFlight) return flushInFlight;
-      const token = ++generation;
-      const queued = enqueueRun(token);
-      const tracked = queued.finally(() => {
+      const startingCancelVersion = cancelVersion;
+      const drain = (async () => {
+        while (!disposed && cancelVersion === startingCancelVersion) {
+          const observedChangeVersion = changeVersion;
+          const observedFlushRequestVersion = flushRequestVersion;
+          clearTimer();
+          const token = ++generation;
+          await enqueueRun(token);
+          if (
+            observedChangeVersion === changeVersion
+            && observedFlushRequestVersion === flushRequestVersion
+          ) return;
+        }
+      })();
+      const tracked = drain.finally(() => {
         if (flushInFlight === tracked) flushInFlight = null;
       });
       flushInFlight = tracked;
@@ -120,6 +137,7 @@ export function createAutosaveController<T>({
     cancelPending() {
       clearTimer();
       generation += 1;
+      cancelVersion += 1;
     },
     dispose() {
       disposed = true;

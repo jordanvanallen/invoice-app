@@ -145,11 +145,15 @@ describe('createAutosaveController', () => {
 
   test('shares one promise across concurrent flush callers', async () => {
     vi.useFakeTimers();
-    let value = 'unsorted';
+    let value = 'before-preview';
     let savedJson = '';
     let releaseFirstSave!: () => void;
+    let markFirstSaveStarted!: () => void;
     const firstSave = new Promise<void>((resolve) => {
       releaseFirstSave = resolve;
+    });
+    const firstSaveStarted = new Promise<void>((resolve) => {
+      markFirstSaveStarted = resolve;
     });
     const savedValues: string[] = [];
     const autosave = createAutosaveController({
@@ -159,23 +163,27 @@ describe('createAutosaveController', () => {
       markSaved: (json) => { savedJson = json; },
       save: async (current) => {
         savedValues.push(current);
-        if (current === 'unsorted') await firstSave;
+        if (current === 'before-preview') {
+          markFirstSaveStarted();
+          await firstSave;
+        }
       },
       setState: () => {},
       delayMs: 25,
     });
 
-    autosave.notifyChanged();
-    await vi.advanceTimersByTimeAsync(25);
-    value = 'preview-sorted';
-
     const firstFlush = autosave.flush();
+    await firstSaveStarted;
+    value = 'preview-sorted';
+    autosave.notifyChanged();
+
     const secondFlush = autosave.flush();
     releaseFirstSave();
     await Promise.all([firstFlush, secondFlush]);
 
     expect(secondFlush).toBe(firstFlush);
-    expect(savedValues).toEqual(['unsorted', 'preview-sorted']);
+    expect(savedValues).toEqual(['before-preview', 'preview-sorted']);
+    expect(savedJson).toBe('preview-sorted');
     autosave.dispose();
   });
 });
