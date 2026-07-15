@@ -52,7 +52,7 @@
 - Produces: `expenseTotal(items): number` and `expenseFinalizeBlockers(draft): ExpenseBlocker[]`.
 - Produces: `buildExpenseSnapshot(draft, settings, seq): ExpenseSnapshot`.
 
-- [ ] **Step 1: Add failing ordering and total tests**
+- [x] **Step 1: Add failing ordering and total tests**
 
 ```ts
 expect(sortExpenseItems([
@@ -63,9 +63,9 @@ expect(sortExpenseItems([
 expect(expenseTotal([item('a', '', 125), item('b', '', 375)])).toBe(500);
 ```
 
-- [ ] **Step 2: Run `npm test -- src/lib/expense/order.test.ts src/lib/expense/validation.test.ts` and confirm RED because the modules do not exist**
+- [x] **Step 2: Run `npm test -- src/lib/expense/order.test.ts src/lib/expense/validation.test.ts` and confirm RED because the modules do not exist**
 
-- [ ] **Step 3: Implement immutable stable ordering, position normalization, integer-cent totals, and plain-language blockers**
+- [x] **Step 3: Implement immutable stable ordering, position normalization, integer-cent totals, and plain-language blockers**
 
 ```ts
 export function sortExpenseItems(items: readonly ExpenseItem[]): ExpenseItem[];
@@ -74,9 +74,9 @@ export function expenseTotal(items: readonly ExpenseItem[]): number;
 export function expenseFinalizeBlockers(draft: ExpenseDraft): ExpenseBlocker[];
 ```
 
-- [ ] **Step 4: Add the failing snapshot test proving canonical order, deep copies, frozen settings/logo, formatted report number, and total**
+- [x] **Step 4: Add the failing snapshot test proving canonical order, deep copies, frozen settings/logo, formatted report number, and total**
 
-- [ ] **Step 5: Implement `buildExpenseSnapshot()` and run all Task 1 tests GREEN**
+- [x] **Step 5: Implement `buildExpenseSnapshot()` and run all Task 1 tests GREEN**
 
 - [ ] **Step 6: Commit Task 1 as `Build expense report domain rules`**
 
