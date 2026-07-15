@@ -18,6 +18,7 @@
   import { buildFinalizedSnapshot } from '$lib/snapshot';
   import { sortInvoiceSections } from '$lib/lineOrder';
   import { defaultInvoicePeriod } from '$lib/ui/date';
+  import { prepareInvoicePreview } from '$lib/ui/preview';
   import { saveInvoicePdf } from '$lib/pdf/generate';
   import { showSaveToast } from '$lib/stores/toast';
   import { backupNow } from '$lib/stores/backup';
@@ -36,7 +37,7 @@
     settleAutosaveBeforeManualSave,
     type AutosaveController,
   } from '$lib/ui/autosave';
-  import { handleWindowCloseRequest } from '$lib/ui/windowClose';
+  import { handleAutosavingWindowCloseRequest } from '$lib/ui/windowClose';
   import type { Settings, DraftInvoice, FinalizedSnapshot } from '$lib/types';
   import type { CatalogEntry } from '$lib/db/catalog-repo';
   import { toEditorRow, type EditorRow } from '$lib/ui/editorRow';
@@ -84,6 +85,12 @@
         mileageCents: l.mileageCents, feeCents: l.feeCents,
       })),
     };
+  }
+
+  function sortInvoiceRows() {
+    const sorted = sortInvoiceSections(completed, noshow);
+    completed = sorted.completed;
+    noshow = sorted.noshow;
   }
 
   function makeAutosave() {
@@ -135,12 +142,9 @@
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       const w = getCurrentWindow();
       unlisten = await w.onCloseRequested(async (event) => {
-        await handleWindowCloseRequest(event, {
-          save: async () => {
-            if (invoiceId !== null && canPersistInvoiceSequence(seqState)) {
-              await saveDraft(await getDb(), invoiceId, buildDraft());
-            }
-          },
+        await handleAutosavingWindowCloseRequest(event, {
+          autosave,
+          canFlush: invoiceId !== null && canPersistInvoiceSequence(seqState),
           destroy: () => w.destroy(),
           exit: async (code) => {
             const { exit } = await import('@tauri-apps/plugin-process');
@@ -238,9 +242,14 @@
   let showPreview = $state(false);
   let previewSnap = $state<FinalizedSnapshot | null>(null);
   async function openPreview() {
-    if (!settings) return;
-    if (seqState.status !== 'ready' || seqState.draftSeq === null) return;
-    previewSnap = buildFinalizedSnapshot(buildDraft(), settings, seqState.draftSeq);
+    const currentSettings = settings;
+    const draftSeq = seqState.draftSeq;
+    if (!currentSettings) return;
+    if (seqState.status !== 'ready' || draftSeq === null) return;
+    previewSnap = prepareInvoicePreview({
+      sortRows: sortInvoiceRows,
+      buildSnapshot: () => buildFinalizedSnapshot(buildDraft(), currentSettings, draftSeq),
+    });
     showPreview = true;
   }
 
@@ -376,11 +385,7 @@
       type="button"
       class="sort-rows"
       disabled={completed.length < 2 && noshow.length < 2}
-      onclick={() => {
-        const sorted = sortInvoiceSections(completed, noshow);
-        completed = sorted.completed;
-        noshow = sorted.noshow;
-      }}
+      onclick={sortInvoiceRows}
     >Sort rows by date</button>
   </div>
 

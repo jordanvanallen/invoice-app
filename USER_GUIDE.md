@@ -79,7 +79,7 @@ The **No‑Shows** section works the same way (default $25 each), without mileag
 
 **Put rows in date order**
 
-Rows stay exactly where they are while you type. When you are ready, click **Sort rows by date** to arrange Completed Inspections and No-Shows separately from oldest to newest. Preview and Lock & Save also use this date order automatically. Rows from the same day stay in their current order.
+Rows stay exactly where they are while you type. When you are ready, click **Sort rows by date** to arrange Completed Inspections and No-Shows separately from oldest to newest. Opening Preview also sorts the visible rows first, so closing Preview returns to the same order you reviewed. Lock & Save uses this date order automatically. Rows from the same day stay in their current order.
 
 **4d. Watch the totals**
 The bar at the bottom always shows **Subtotal**, **HST**, and **Total** as you go. A note like “Date is outside the billing period” is just a friendly heads‑up — it does **not** stop you from saving.

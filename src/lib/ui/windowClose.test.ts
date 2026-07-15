@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { handleWindowCloseRequest } from './windowClose';
+import { createAutosaveController, flushPendingAutosave } from './autosave';
+import { handleAutosavingWindowCloseRequest, handleWindowCloseRequest } from './windowClose';
 
 function closeEvent() {
   return { preventDefault: vi.fn() };
@@ -74,5 +75,146 @@ describe('handleWindowCloseRequest', () => {
     await closing;
 
     expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  test('queues the latest draft behind an in-flight autosave before closing', async () => {
+    vi.useFakeTimers();
+    let draft = 'unsorted';
+    let savedDraft = '';
+    let releaseFirstSave!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve;
+    });
+    const savedDrafts: string[] = [];
+    const autosave = createAutosaveController({
+      read: () => draft,
+      serialize: (value) => value,
+      isSaved: (json) => json === savedDraft,
+      markSaved: (json) => { savedDraft = json; },
+      save: async (value) => {
+        savedDrafts.push(value);
+        if (value === 'unsorted') await firstSave;
+      },
+      setState: () => {},
+      delayMs: 25,
+    });
+
+    autosave.notifyChanged();
+    await vi.advanceTimersByTimeAsync(25);
+    expect(savedDrafts).toEqual(['unsorted']);
+
+    draft = 'preview-sorted';
+    const destroy = vi.fn(async () => {});
+    const closing = handleAutosavingWindowCloseRequest(closeEvent(), {
+      autosave,
+      canFlush: true,
+      destroy,
+      saveTimeoutMs: 1_000,
+    });
+    await Promise.resolve();
+
+    expect(savedDrafts).toEqual(['unsorted']);
+    expect(destroy).not.toHaveBeenCalled();
+
+    releaseFirstSave();
+    await closing;
+
+    expect(savedDrafts).toEqual(['unsorted', 'preview-sorted']);
+    expect(savedDraft).toBe('preview-sorted');
+    expect(destroy).toHaveBeenCalledOnce();
+    autosave.dispose();
+  });
+
+  test('keeps double-close callers on the same latest-draft flush', async () => {
+    vi.useFakeTimers();
+    let draft = 'unsorted';
+    let savedDraft = '';
+    let releaseFirstSave!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve;
+    });
+    const savedDrafts: string[] = [];
+    const autosave = createAutosaveController({
+      read: () => draft,
+      serialize: (value) => value,
+      isSaved: (json) => json === savedDraft,
+      markSaved: (json) => { savedDraft = json; },
+      save: async (value) => {
+        savedDrafts.push(value);
+        if (value === 'unsorted') await firstSave;
+      },
+      setState: () => {},
+      delayMs: 25,
+    });
+
+    autosave.notifyChanged();
+    await vi.advanceTimersByTimeAsync(25);
+    draft = 'preview-sorted';
+
+    const firstClose = handleAutosavingWindowCloseRequest(closeEvent(), {
+      autosave,
+      canFlush: true,
+      destroy: async () => { autosave.dispose(); },
+    });
+    const secondClose = handleAutosavingWindowCloseRequest(closeEvent(), {
+      autosave,
+      canFlush: true,
+      destroy: async () => {},
+    });
+
+    releaseFirstSave();
+    await Promise.all([firstClose, secondClose]);
+
+    expect(savedDrafts).toEqual(['unsorted', 'preview-sorted']);
+    expect(savedDraft).toBe('preview-sorted');
+  });
+
+  test('shares the latest-draft flush between navigation and close', async () => {
+    vi.useFakeTimers();
+    let draft = 'before-preview';
+    let savedDraft = '';
+    let releaseFirstSave!: () => void;
+    let markFirstSaveStarted!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve;
+    });
+    const firstSaveStarted = new Promise<void>((resolve) => {
+      markFirstSaveStarted = resolve;
+    });
+    const savedDrafts: string[] = [];
+    const autosave = createAutosaveController({
+      read: () => draft,
+      serialize: (value) => value,
+      isSaved: (json) => json === savedDraft,
+      markSaved: (json) => { savedDraft = json; },
+      save: async (value) => {
+        savedDrafts.push(value);
+        if (value === 'before-preview') {
+          markFirstSaveStarted();
+          await firstSave;
+        }
+      },
+      setState: () => {},
+      delayMs: 25,
+    });
+
+    const navigation = flushPendingAutosave(autosave, true)?.then(() => {
+      autosave.dispose();
+    });
+    await firstSaveStarted;
+    draft = 'preview-sorted';
+    autosave.notifyChanged();
+
+    const closing = handleAutosavingWindowCloseRequest(closeEvent(), {
+      autosave,
+      canFlush: true,
+      destroy: async () => {},
+    });
+
+    releaseFirstSave();
+    await Promise.all([navigation, closing]);
+
+    expect(savedDrafts).toEqual(['before-preview', 'preview-sorted']);
+    expect(savedDraft).toBe('preview-sorted');
   });
 });

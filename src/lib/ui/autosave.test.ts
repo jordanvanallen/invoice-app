@@ -142,6 +142,92 @@ describe('createAutosaveController', () => {
 
     autosave.dispose();
   });
+
+  test('shares one promise across concurrent flush callers', async () => {
+    vi.useFakeTimers();
+    let value = 'before-preview';
+    let savedJson = '';
+    let releaseFirstSave!: () => void;
+    let markFirstSaveStarted!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve;
+    });
+    const firstSaveStarted = new Promise<void>((resolve) => {
+      markFirstSaveStarted = resolve;
+    });
+    const savedValues: string[] = [];
+    const autosave = createAutosaveController({
+      read: () => value,
+      serialize: (current) => current,
+      isSaved: (json) => json === savedJson,
+      markSaved: (json) => { savedJson = json; },
+      save: async (current) => {
+        savedValues.push(current);
+        if (current === 'before-preview') {
+          markFirstSaveStarted();
+          await firstSave;
+        }
+      },
+      setState: () => {},
+      delayMs: 25,
+    });
+
+    const firstFlush = autosave.flush();
+    await firstSaveStarted;
+    value = 'preview-sorted';
+    autosave.notifyChanged();
+
+    const secondFlush = autosave.flush();
+    releaseFirstSave();
+    await Promise.all([firstFlush, secondFlush]);
+
+    expect(secondFlush).toBe(firstFlush);
+    expect(savedValues).toEqual(['before-preview', 'preview-sorted']);
+    expect(savedJson).toBe('preview-sorted');
+    autosave.dispose();
+  });
+
+  test('starts a successor flush after canceling an active drain', async () => {
+    let value = 'before-cancel';
+    let savedJson = '';
+    let releaseFirstSave!: () => void;
+    let markFirstSaveStarted!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve;
+    });
+    const firstSaveStarted = new Promise<void>((resolve) => {
+      markFirstSaveStarted = resolve;
+    });
+    const savedValues: string[] = [];
+    const autosave = createAutosaveController({
+      read: () => value,
+      serialize: (current) => current,
+      isSaved: (json) => json === savedJson,
+      markSaved: (json) => { savedJson = json; },
+      save: async (current) => {
+        savedValues.push(current);
+        if (current === 'before-cancel') {
+          markFirstSaveStarted();
+          await firstSave;
+        }
+      },
+      setState: () => {},
+    });
+
+    const canceledFlush = autosave.flush();
+    await firstSaveStarted;
+    autosave.cancelPending();
+    value = 'after-cancel';
+    const successorFlush = autosave.flush();
+
+    expect(successorFlush).not.toBe(canceledFlush);
+    releaseFirstSave();
+    await Promise.all([canceledFlush, successorFlush]);
+
+    expect(savedValues).toEqual(['before-cancel', 'after-cancel']);
+    expect(savedJson).toBe('after-cancel');
+    autosave.dispose();
+  });
 });
 
 describe('flushPendingAutosave', () => {
