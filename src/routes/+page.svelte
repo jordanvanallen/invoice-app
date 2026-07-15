@@ -86,6 +86,12 @@
     };
   }
 
+  function sortInvoiceRows() {
+    const sorted = sortInvoiceSections(completed, noshow);
+    completed = sorted.completed;
+    noshow = sorted.noshow;
+  }
+
   function makeAutosave() {
     autosave?.dispose();
     autosave = createAutosaveController({
@@ -240,6 +246,7 @@
   async function openPreview() {
     if (!settings) return;
     if (seqState.status !== 'ready' || seqState.draftSeq === null) return;
+    sortInvoiceRows();
     previewSnap = buildFinalizedSnapshot(buildDraft(), settings, seqState.draftSeq);
     showPreview = true;
   }
@@ -376,11 +383,7 @@
       type="button"
       class="sort-rows"
       disabled={completed.length < 2 && noshow.length < 2}
-      onclick={() => {
-        const sorted = sortInvoiceSections(completed, noshow);
-        completed = sorted.completed;
-        noshow = sorted.noshow;
-      }}
+      onclick={sortInvoiceRows}
     >Sort rows by date</button>
   </div>
 
