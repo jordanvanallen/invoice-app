@@ -50,6 +50,7 @@ export function createAutosaveController<T>({
   let generation = 0;
   let disposed = false;
   let saveQueue = Promise.resolve();
+  let flushInFlight: Promise<void> | null = null;
 
   function clearTimer() {
     if (timer) {
@@ -105,10 +106,16 @@ export function createAutosaveController<T>({
       if (isSaved(json)) return;
       schedule(delayMs, true);
     },
-    async flush() {
+    flush() {
       clearTimer();
+      if (flushInFlight) return flushInFlight;
       const token = ++generation;
-      await enqueueRun(token);
+      const queued = enqueueRun(token);
+      const tracked = queued.finally(() => {
+        if (flushInFlight === tracked) flushInFlight = null;
+      });
+      flushInFlight = tracked;
+      return tracked;
     },
     cancelPending() {
       clearTimer();

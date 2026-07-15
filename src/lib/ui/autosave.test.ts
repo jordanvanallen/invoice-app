@@ -142,6 +142,42 @@ describe('createAutosaveController', () => {
 
     autosave.dispose();
   });
+
+  test('shares one promise across concurrent flush callers', async () => {
+    vi.useFakeTimers();
+    let value = 'unsorted';
+    let savedJson = '';
+    let releaseFirstSave!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve;
+    });
+    const savedValues: string[] = [];
+    const autosave = createAutosaveController({
+      read: () => value,
+      serialize: (current) => current,
+      isSaved: (json) => json === savedJson,
+      markSaved: (json) => { savedJson = json; },
+      save: async (current) => {
+        savedValues.push(current);
+        if (current === 'unsorted') await firstSave;
+      },
+      setState: () => {},
+      delayMs: 25,
+    });
+
+    autosave.notifyChanged();
+    await vi.advanceTimersByTimeAsync(25);
+    value = 'preview-sorted';
+
+    const firstFlush = autosave.flush();
+    const secondFlush = autosave.flush();
+    releaseFirstSave();
+    await Promise.all([firstFlush, secondFlush]);
+
+    expect(secondFlush).toBe(firstFlush);
+    expect(savedValues).toEqual(['unsorted', 'preview-sorted']);
+    autosave.dispose();
+  });
 });
 
 describe('flushPendingAutosave', () => {
