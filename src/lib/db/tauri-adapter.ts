@@ -1,5 +1,6 @@
 import Database from '@tauri-apps/plugin-sql';
-import type { Db, DbResult } from './db';
+import { invoke } from '@tauri-apps/api/core';
+import type { Db, DbResult, DbStatement } from './db';
 
 /** Rewrite positional `?` placeholders to `$1, $2, …` for tauri-plugin-sql. */
 function toNumbered(sql: string): string {
@@ -15,6 +16,15 @@ export async function createTauriDb(dbFile = 'sqlite:invoice.db'): Promise<Db & 
   const raw = await Database.load(dbFile);
   return {
     raw,
+    async executeTransaction(statements: DbStatement[]): Promise<void> {
+      await invoke('execute_sqlite_transaction', {
+        db: dbFile,
+        statements: statements.map((statement) => ({
+          sql: statement.sql,
+          params: statement.params ?? [],
+        })),
+      });
+    },
     async execute(sql: string, params: unknown[] = []): Promise<DbResult> {
       const r = await raw.execute(toNumbered(sql), params as unknown[]);
       return { rowsAffected: r.rowsAffected, lastInsertId: r.lastInsertId };

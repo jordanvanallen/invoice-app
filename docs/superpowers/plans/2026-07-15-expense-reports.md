@@ -78,7 +78,7 @@ export function expenseFinalizeBlockers(draft: ExpenseDraft): ExpenseBlocker[];
 
 - [x] **Step 5: Implement `buildExpenseSnapshot()` and run all Task 1 tests GREEN**
 
-- [ ] **Step 6: Commit Task 1 as `Build expense report domain rules`**
+- [x] **Step 6: Commit Task 1 as `Build expense report domain rules`**
 
 ### Task 2: Schema Version 4 and Restore Compatibility
 
@@ -113,7 +113,7 @@ expect(await userVersion(db)).toBe(4);
 
 - [x] **Step 6: Run migration and restore tests GREEN, then run all existing DB tests**
 
-- [ ] **Step 7: Commit Task 2 as `Add expense report database migration`**
+- [x] **Step 7: Commit Task 2 as `Add expense report database migration`**
 
 ### Task 3: Transactional Expense Repository
 
@@ -127,21 +127,21 @@ expect(await userVersion(db)).toBe(4);
 - Produces `listExpenseYears`, `expenseYearRollup`, `listExpensesForYear`, `searchExpenses`, and `listVoidedExpenses`.
 - Produces `duplicateExpenseReport`, `voidExpenseReport`, `restoreExpenseReport`, `deleteVoidedExpenseReport`, and `getExpenseStatus`.
 
-- [ ] **Step 1: Add failing tests for create/save/load, incomplete drafts, latest-draft reopening, and independent invoice/expense next numbers**
+- [x] **Step 1: Add failing tests for create/save/load, incomplete drafts, latest-draft reopening, and independent invoice/expense next numbers**
 
-- [ ] **Step 2: Run `npm test -- src/lib/db/expense-repo.test.ts` and confirm RED**
+- [x] **Step 2: Run `npm test -- src/lib/db/expense-repo.test.ts` and confirm RED**
 
-- [ ] **Step 3: Implement draft persistence and independent counter queries using `runInTransaction()`**
+- [x] **Step 3: Implement draft persistence and independent counter queries using a same-connection atomic transaction batch**
 
-- [ ] **Step 4: Add failing finalization tests for validation, selected sequences, duplicate rejection, counter advancement, canonical stored order, frozen snapshot, and rollback**
+- [x] **Step 4: Add failing finalization tests for validation, selected sequences, duplicate rejection, counter advancement, canonical stored order, frozen snapshot, and rollback**
 
-- [ ] **Step 5: Implement one-transaction finalization with repository-level blocker checks and guarded counter reservation**
+- [x] **Step 5: Implement one-transaction finalization with repository-level blocker checks and guarded counter reservation**
 
-- [ ] **Step 6: Add failing history/search/rollup/duplicate/cancel/restore/delete/status-guard tests**
+- [x] **Step 6: Add failing history/search/rollup/duplicate/cancel/restore/delete/status-guard tests**
 
-- [ ] **Step 7: Implement history and lifecycle functions; assert affected status before reporting success**
+- [x] **Step 7: Implement history and lifecycle functions; assert affected status before reporting success**
 
-- [ ] **Step 8: Run `npm test -- src/lib/db/expense-repo.test.ts src/lib/db/invoice-repo.test.ts` GREEN**
+- [x] **Step 8: Run repository, atomic transaction, and invoice regression tests GREEN**
 
 - [ ] **Step 9: Commit Task 3 as `Add expense report persistence lifecycle`**
 
