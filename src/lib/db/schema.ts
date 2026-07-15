@@ -101,4 +101,36 @@ export const MIGRATIONS: Migration[] = [
       `CREATE UNIQUE INDEX idx_clients_name_key ON clients(name_key)`,
     ],
   },
+  {
+    version: 4,
+    statements: [
+      `CREATE TABLE expense_year_counters (
+        year INTEGER PRIMARY KEY,
+        last_seq INTEGER NOT NULL CHECK (last_seq > 0)
+      )`,
+      `CREATE TABLE expense_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        year INTEGER NOT NULL,
+        seq INTEGER CHECK (seq IS NULL OR seq > 0),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','finalized','void')),
+        report_date TEXT NOT NULL DEFAULT '',
+        period_start TEXT NOT NULL DEFAULT '',
+        period_end TEXT NOT NULL DEFAULT '',
+        finalized_at TEXT,
+        total_cents INTEGER NOT NULL DEFAULT 0 CHECK (total_cents >= 0),
+        snapshot_json TEXT,
+        UNIQUE (year, seq)
+      )`,
+      `CREATE TABLE expense_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        expense_report_id INTEGER NOT NULL REFERENCES expense_reports(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL DEFAULT 0,
+        date TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        amount_cents INTEGER NOT NULL DEFAULT 0 CHECK (amount_cents >= 0)
+      )`,
+      `CREATE INDEX idx_expense_reports_year_status ON expense_reports(year, status, report_date)`,
+      `CREATE INDEX idx_expense_items_report ON expense_items(expense_report_id, position)`,
+    ],
+  },
 ];

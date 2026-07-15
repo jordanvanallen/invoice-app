@@ -94,7 +94,7 @@ export function expenseFinalizeBlockers(draft: ExpenseDraft): ExpenseBlocker[];
 - Extends `BackupSummary` with `expenseReportCount: number` and `latestExpenseReportDate: string | null`.
 - Requires expense tables only when `PRAGMA user_version >= 4`; accepts schema versions 1-3 and reports zero/none expense content.
 
-- [ ] **Step 1: Add failing migration tests for a fresh v4 database and a v3-to-v4 database that preserves invoice rows**
+- [x] **Step 1: Add failing migration tests for a fresh v4 database and a v3-to-v4 database that preserves invoice rows**
 
 ```ts
 expect(await tableNames(db)).toEqual(expect.arrayContaining([
@@ -103,15 +103,15 @@ expect(await tableNames(db)).toEqual(expect.arrayContaining([
 expect(await userVersion(db)).toBe(4);
 ```
 
-- [ ] **Step 2: Run `npm test -- src/lib/db/migrate.test.ts` and confirm RED**
+- [x] **Step 2: Run `npm test -- src/lib/db/migrate.test.ts` and confirm RED**
 
-- [ ] **Step 3: Append migration 4 with constrained statuses, positive counter checks, unique `(year, seq)`, cascading item deletion, and indexes**
+- [x] **Step 3: Append migration 4 with constrained statuses, positive counter checks, unique `(year, seq)`, cascading item deletion, and indexes**
 
-- [ ] **Step 4: Add failing restore tests for valid v3, valid v4 with expense data, v4 missing expense tables, and newer-than-v4 rejection**
+- [x] **Step 4: Add failing restore tests for valid v3, valid v4 with expense data, v4 missing expense tables, and newer-than-v4 rejection**
 
-- [ ] **Step 5: Implement version-aware restore validation and show expense counts/dates in the existing confirmation summary**
+- [x] **Step 5: Implement version-aware restore validation and show expense counts/dates in the existing confirmation summary**
 
-- [ ] **Step 6: Run migration and restore tests GREEN, then run all existing DB tests**
+- [x] **Step 6: Run migration and restore tests GREEN, then run all existing DB tests**
 
 - [ ] **Step 7: Commit Task 2 as `Add expense report database migration`**
 

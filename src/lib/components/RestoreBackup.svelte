@@ -74,6 +74,8 @@
         <li><span>Business</span><b>{summary.businessName}</b></li>
         <li><span>Finalized invoices</span><b>{summary.invoiceCount}</b></li>
         <li><span>Latest invoice</span><b>{summary.latestInvoiceDate ?? '—'}</b></li>
+        <li><span>Finalized expense reports</span><b>{summary.expenseReportCount}</b></li>
+        <li><span>Latest expense report</span><b>{summary.latestExpenseReportDate ?? '—'}</b></li>
       </ul>
       <p class="warn">This will <b>replace everything currently in the app</b> and can't be undone. Your current data is saved to <b>invoice-before-restore.db</b> first, just in case.</p>
 

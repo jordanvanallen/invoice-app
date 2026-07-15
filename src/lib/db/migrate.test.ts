@@ -1,6 +1,7 @@
 import { test, expect, describe } from 'vitest';
 import { createSqlJsDb } from './sqljs-adapter';
 import { runMigrations } from './migrate';
+import { MIGRATIONS } from './schema';
 import type { Db, DbResult } from './db';
 
 function withoutSqlTransactions(db: Db): Db {
@@ -22,17 +23,27 @@ async function tableNames(db: Awaited<ReturnType<typeof createSqlJsDb>>): Promis
   return rows.map((r) => r.name);
 }
 
+async function migrateThroughVersion3(db: Awaited<ReturnType<typeof createSqlJsDb>>) {
+  for (const migration of MIGRATIONS.filter((entry) => entry.version <= 3)) {
+    for (const statement of migration.statements) await db.execute(statement);
+    await db.execute(`PRAGMA user_version = ${migration.version}`);
+  }
+}
+
 describe('runMigrations', () => {
   test('creates all tables and sets user_version', async () => {
     const db = await createSqlJsDb();
     const version = await runMigrations(db);
-    expect(version).toBe(3);
+    expect(version).toBe(4);
     const names = await tableNames(db);
     for (const t of ['settings', 'clients', 'locations', 'year_counters', 'invoices', 'line_items']) {
       expect(names).toContain(t);
     }
+    for (const t of ['expense_year_counters', 'expense_reports', 'expense_items']) {
+      expect(names).toContain(t);
+    }
     const uv = await db.select<{ user_version: number }>('PRAGMA user_version');
-    expect(uv[0].user_version).toBe(3);
+    expect(uv[0].user_version).toBe(4);
     const s = await db.select<{ id: number }>('SELECT id FROM settings');
     expect(s).toEqual([{ id: 1 }]);
     // v2 added the logo column
@@ -40,6 +51,23 @@ describe('runMigrations', () => {
     expect(cols.map((c) => c.name)).toContain('logo_data_url');
     const clientCols = await db.select<{ name: string }>("SELECT name FROM pragma_table_info('clients')");
     expect(clientCols.map((c) => c.name)).toContain('name_key');
+  });
+
+  test('migrates a version-3 database without changing existing invoice data', async () => {
+    const db = await createSqlJsDb();
+    await migrateThroughVersion3(db);
+    await db.execute(
+      "INSERT INTO invoices (year, seq, status, issue_date) VALUES (2026, 9, 'finalized', '2026-07-01')",
+    );
+
+    await expect(runMigrations(db)).resolves.toBe(4);
+
+    expect(await db.select('SELECT year, seq, issue_date FROM invoices')).toEqual([
+      { year: 2026, seq: 9, issue_date: '2026-07-01' },
+    ]);
+    expect(await tableNames(db)).toEqual(expect.arrayContaining([
+      'expense_year_counters', 'expense_reports', 'expense_items',
+    ]));
   });
 
   test('backfills client name keys and enforces case-insensitive uniqueness', async () => {
@@ -74,7 +102,7 @@ describe('runMigrations', () => {
 
   test('runs on adapters that do not support raw transaction commands', async () => {
     const db = withoutSqlTransactions(await createSqlJsDb());
-    await expect(runMigrations(db)).resolves.toBe(3);
+    await expect(runMigrations(db)).resolves.toBe(4);
     const s = await db.select<{ id: number }>('SELECT id FROM settings');
     expect(s).toEqual([{ id: 1 }]);
   });

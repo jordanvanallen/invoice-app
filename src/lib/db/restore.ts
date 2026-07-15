@@ -9,10 +9,16 @@ export const REQUIRED_TABLES = [
   'settings', 'clients', 'locations', 'year_counters', 'invoices', 'line_items',
 ] as const;
 
+export const EXPENSE_TABLES = [
+  'expense_year_counters', 'expense_reports', 'expense_items',
+] as const;
+
 export interface BackupSummary {
   businessName: string;
   invoiceCount: number; // finalized invoices
   latestInvoiceDate: string | null;
+  expenseReportCount: number; // finalized expense reports
+  latestExpenseReportDate: string | null;
 }
 
 export interface BackupCheck {
@@ -57,17 +63,29 @@ export async function validateBackup(db: Db): Promise<BackupCheck> {
   if (schemaVersion > LATEST_SCHEMA_VERSION) {
     return { ok: false, reason: 'This backup is from a newer version of the app. Update Invoice Maker first, then restore.' };
   }
+  const hasExpenseSchema = schemaVersion >= 4;
+  if (hasExpenseSchema && EXPENSE_TABLES.some((table) => !names.has(table))) {
+    return { ok: false, reason: "This doesn't look like an Invoice Maker backup — it's missing expected data." };
+  }
 
   // Content summary for the user to eyeball before committing.
   const set = await db.select<{ name: string }>('SELECT inspector_name AS name FROM settings WHERE id = 1');
   const cnt = await db.select<{ c: number }>("SELECT COUNT(*) AS c FROM invoices WHERE status = 'finalized'");
   const latest = await db.select<{ d: string | null }>("SELECT MAX(issue_date) AS d FROM invoices WHERE status = 'finalized'");
+  const expenseCount = hasExpenseSchema
+    ? await db.select<{ c: number }>("SELECT COUNT(*) AS c FROM expense_reports WHERE status = 'finalized'")
+    : [{ c: 0 }];
+  const latestExpense = hasExpenseSchema
+    ? await db.select<{ d: string | null }>("SELECT MAX(report_date) AS d FROM expense_reports WHERE status = 'finalized'")
+    : [{ d: null }];
   return {
     ok: true,
     summary: {
       businessName: set[0]?.name?.trim() || '(no business name set)',
       invoiceCount: cnt[0]?.c ?? 0,
       latestInvoiceDate: latest[0]?.d ?? null,
+      expenseReportCount: expenseCount[0]?.c ?? 0,
+      latestExpenseReportDate: latestExpense[0]?.d ?? null,
     },
   };
 }
