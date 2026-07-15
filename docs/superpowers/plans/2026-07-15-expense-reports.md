@@ -263,7 +263,7 @@ npm run tauri -- build --debug
 git status --short --branch
 ```
 
-- [ ] **Step 8: Merge locally into `dev` only after every gate passes, then rerun `npm test` on merged `dev`**
+- [x] **Step 8: Merge locally into `dev` only after every gate passes, then rerun `npm test` on merged `dev`**
 
 ## Plan Self-Review
 
