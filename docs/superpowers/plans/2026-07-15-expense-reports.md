@@ -169,7 +169,7 @@ expect(await userVersion(db)).toBe(4);
 
 - [x] **Step 5: Build `ExpenseView.svelte` from snapshot data only and run PDF tests GREEN**
 
-- [ ] **Step 6: Commit Task 4 as `Add expense report snapshot PDF view`**
+- [x] **Step 6: Commit Task 4 as `Add expense report snapshot PDF view`**
 
 ### Task 5: Autosaved Expense Editor
 
@@ -186,19 +186,19 @@ expect(await userVersion(db)).toBe(4);
 - `expenseEditor.ts` supplies pure Preview snapshot preparation and first-blocker targeting data.
 - The route reopens/creates one draft, uses `createAutosaveController`, and calls repository/PDF/backup boundaries.
 
-- [ ] **Step 1: Add failing tests for sequence parsing, deliberate override retention across year changes, Preview sorting without editor mutation, and first blocker selection**
+- [x] **Step 1: Add failing tests for sequence parsing, deliberate override retention across year changes, Preview sorting without editor mutation, and first blocker selection**
 
-- [ ] **Step 2: Run the focused UI helper tests and confirm RED**
+- [x] **Step 2: Run the focused UI helper tests and confirm RED**
 
-- [ ] **Step 3: Implement the pure helpers and run them GREEN**
+- [x] **Step 3: Implement the pure helpers and run them GREEN**
 
-- [ ] **Step 4: Add the Svelte route with labelled report number/date/period controls, Date/Description/Total Amount rows, add/remove, running total, explicit Sort, Preview, and Lock & Save**
+- [x] **Step 4: Add the Svelte route with labelled report number/date/period controls, Date/Description/Total Amount rows, add/remove, running total, explicit Sort, Preview, and Lock & Save**
 
-- [ ] **Step 5: Wire autosave to partial drafts; settle it before finalization; guard repeated finalization; persist canonical order; save PDF; trigger backup; then open a fresh draft**
+- [x] **Step 5: Wire autosave to partial drafts; settle it before finalization; guard repeated finalization; persist canonical order; save PDF; trigger backup; then open a fresh draft**
 
-- [ ] **Step 6: Add a route contract test asserting navigation labels, sort/preview/finalize handlers, SaveStatusChip, ExpenseView, and destructive-free editor behavior**
+- [x] **Step 6: Add a route contract test asserting navigation labels, sort/preview/finalize handlers, SaveStatusChip, ExpenseView, and destructive-free editor behavior**
 
-- [ ] **Step 7: Run focused tests plus `npm run check` GREEN**
+- [x] **Step 7: Run focused tests plus `npm run check` GREEN**
 
 - [ ] **Step 8: Commit Task 5 as `Add autosaved expense report editor`**
 

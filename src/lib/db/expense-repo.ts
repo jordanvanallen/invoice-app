@@ -72,7 +72,11 @@ export async function loadExpenseDraft(db: Db, reportId: number): Promise<Expens
   };
 }
 
-async function takenExpenseSeqs(db: Db, year: number, excludeId?: number): Promise<number[]> {
+export async function takenExpenseSequences(
+  db: Db,
+  year: number,
+  excludeId?: number,
+): Promise<number[]> {
   const params: unknown[] = [year];
   const exclude = excludeId === undefined ? '' : ' AND id != ?';
   if (excludeId !== undefined) params.push(excludeId);
@@ -129,7 +133,7 @@ export async function saveExpenseDraft(
   }
   const year = deriveExpenseYear(draft.reportDate, draft.year);
   if (draft.seq !== null) {
-    validateSelectedExpenseSeq(draft.seq, await takenExpenseSeqs(db, year, reportId));
+    validateSelectedExpenseSeq(draft.seq, await takenExpenseSequences(db, year, reportId));
   }
   await executeStatementsAtomically(db, [
     requireDraftStatement(reportId),
@@ -182,7 +186,7 @@ export async function finalizeExpenseReport(db: Db, reportId: number): Promise<E
   if (blockers.length) throw new Error(blockers[0].message);
   const seq = draft.seq as number;
   const settings = await getSettings(db);
-  validateSelectedExpenseSeq(seq, await takenExpenseSeqs(db, draft.year, reportId));
+  validateSelectedExpenseSeq(seq, await takenExpenseSequences(db, draft.year, reportId));
   const orderedItems = orderExpenseItems(draft.items);
   const normalized = { ...draft, seq, items: orderedItems };
   const snapshot = buildExpenseSnapshot(normalized, settings, seq);
