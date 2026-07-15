@@ -4,8 +4,9 @@ A simple guide to installing and using **Invoice Maker** on your Windows PC. No 
 
 Invoice Maker lets you:
 - Build invoices for completed inspections and no‑shows.
+- Create simple expense reports with dated descriptions and amounts.
 - Save them as tidy PDFs you can email or print.
-- Keep a history of every invoice and pull tax summaries.
+- Keep separate histories for invoices and expense reports, and pull invoice tax summaries.
 - Automatically back up all your data.
 
 Everything stays **on your computer** — nothing is uploaded anywhere.
@@ -45,7 +46,9 @@ On the **left** is the menu:
 | Menu item | What it’s for |
 |---|---|
 | **New Invoice** | Create the invoice you’re working on now |
-| **History** | See, reprint, or duplicate past invoices; tax summaries |
+| **Invoice History** | See, reprint, or duplicate past invoices; tax summaries |
+| **Expense Reports** | Create the expense report you’re working on now |
+| **Expense History** | See, reprint, duplicate, cancel, or restore expense reports |
 | **Clients** | Manage your list of clients (add, rename, hide) |
 | **Locations** | Manage your list of inspection locations |
 | **Settings** | Your details, prices, theme, text size, save folder, updates |
@@ -96,11 +99,21 @@ Once locked, the invoice becomes a permanent record. You can always reprint it f
 
 > Where do PDFs go? By default your **Downloads** folder. You can change this in **Settings → Where files are saved**.
 
+### Create an expense report
+
+1. Open **Expense Reports** from the left menu. The latest unfinished report opens automatically and autosaves as you work.
+2. Check the **report number**, **report date**, and **reporting period** at the top.
+3. Fill in each row's **Date**, **Description**, and **Amount**. Use **+ Add an expense** for another row or **Remove** to delete one.
+4. Rows stay still while you type. Click **Sort rows by date** when you want to arrange them, or use **Preview** to see a date-sorted copy without changing the editor.
+5. Click **Lock & Save** when every row is complete. The app sorts the saved report by date, creates its PDF, and backs up your data.
+
+Locked expense reports cannot be edited. Open **Expense History** to view or save the PDF again, duplicate one into a new editable draft, or cancel and restore a report. Cancelled expense reports are kept in a separate **Cancelled expense reports** section and do not count in yearly expense totals.
+
 ---
 
 ## Stage 6 — History, reprints & tax summaries
 
-Open **History** to see every finalized invoice, grouped by year.
+Open **Invoice History** to see every finalized invoice, grouped by year.
 
 - **View an invoice:** click its **number** (e.g. `#3‑2026`) or the **View** button.
 - **Download PDF again:** click **Download PDF** on any row.
@@ -130,7 +143,7 @@ Cancelled invoices stay in your records and don’t count toward income or HST u
 
 Invoice Maker protects your data automatically:
 
-- A full backup (`invoice-backup.db`) is saved **every time you finalize an invoice**.
+- A full backup (`invoice-backup.db`) is saved **every time you finalize an invoice or expense report**.
 - You can back up any time from **Settings → Where files are saved → Back up now**. The last backup time shows at the bottom of the left menu.
 
 **Strongly recommended:** in **Settings**, set your save folder to a **Dropbox**, **OneDrive**, or **Google Drive** folder. Then every PDF and backup is copied off your computer automatically — so you’re safe even if the PC fails.
@@ -168,7 +181,8 @@ Everything you can adjust, in **Settings**:
 | **“Windows protected your PC” when installing** | Click **More info → Run anyway**. Normal for new apps. |
 | **My PDF didn’t appear** | Check the folder shown in the save message, or **Settings → Where files are saved → Open this folder**. |
 | **“Date is outside the billing period” warning** | Just informational — it won’t stop you saving or finalizing. |
-| **I cancelled an invoice by accident** | History → red **Cancelled invoices** button → **Restore**. |
+| **I cancelled an invoice by accident** | Invoice History → red **Cancelled invoices** button → **Restore**. |
+| **I cancelled an expense report by accident** | Expense History → **Cancelled expense reports** → **Restore**. |
 | **Text is too small to read** | **Settings → Display → Large** or **Extra‑large**. |
 | **Is my data safe / backed up?** | Yes — it backs up on every save. Point the save folder at Dropbox/OneDrive for an off‑machine copy. |
 | **How do I get the newest version?** | It updates itself on launch, or use **Settings → Check for updates**. |

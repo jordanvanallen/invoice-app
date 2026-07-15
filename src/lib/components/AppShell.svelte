@@ -5,14 +5,19 @@
   let { children } = $props();
   const nav = [
     { href: '/', label: 'New Invoice' },
-    { href: '/history', label: 'History' },
+    { href: '/history', label: 'Invoice History' },
+    { href: '/expenses', label: 'Expense Reports' },
+    { href: '/expense-history', label: 'Expense History' },
     { href: '/clients', label: 'Clients' },
     { href: '/locations', label: 'Locations' },
     { href: '/backups', label: 'Backups' },
     { href: '/settings', label: 'Settings' },
   ];
-  const isActive = (href: string, path: string) =>
-    href === '/' ? path === '/' : path.startsWith(href);
+  const isActive = (href: string, path: string) => {
+    if (href === '/') return path === '/';
+    if (href === '/expense-history') return path.startsWith('/expense-history') || path.startsWith('/expense/');
+    return path.startsWith(href);
+  };
 </script>
 
 <div class="shell">

@@ -200,7 +200,7 @@ expect(await userVersion(db)).toBe(4);
 
 - [x] **Step 7: Run focused tests plus `npm run check` GREEN**
 
-- [ ] **Step 8: Commit Task 5 as `Add autosaved expense report editor`**
+- [x] **Step 8: Commit Task 5 as `Add autosaved expense report editor`**
 
 ### Task 6: History, Detail, Navigation, and Documentation
 
@@ -217,17 +217,17 @@ expect(await userVersion(db)).toBe(4);
 - History consumes repository grouping/search/rollup/cancelled functions.
 - Detail consumes frozen snapshot and guarded lifecycle functions; finalized reports remain read-only.
 
-- [ ] **Step 1: Add failing source-contract tests for both routes and sidebar entries**
+- [x] **Step 1: Add failing source-contract tests for both routes and sidebar entries**
 
-- [ ] **Step 2: Run focused contract tests and confirm RED**
+- [x] **Step 2: Run focused contract tests and confirm RED**
 
-- [ ] **Step 3: Implement grouped finalized history, live search, yearly counts/totals, Download/View/Duplicate actions, and a separate collapsible Cancelled section**
+- [x] **Step 3: Implement grouped finalized history, live search, yearly counts/totals, Download/View/Duplicate actions, and a separate collapsible Cancelled section**
 
-- [ ] **Step 4: Implement detail loading, frozen `ExpenseView`, PDF re-save, duplicate, cancel, restore, and double-confirmed permanent delete with busy guards and actionable errors**
+- [x] **Step 4: Implement detail loading, frozen `ExpenseView`, PDF re-save, duplicate, cancel, restore, and double-confirmed permanent delete with busy guards and actionable errors**
 
-- [ ] **Step 5: Add sidebar links and concise user-guide instructions for creating, previewing, finalizing, finding, restoring, and duplicating expense reports**
+- [x] **Step 5: Add sidebar links and concise user-guide instructions for creating, previewing, finalizing, finding, restoring, and duplicating expense reports**
 
-- [ ] **Step 6: Run focused route tests, all expense tests, and `npm run check` GREEN**
+- [x] **Step 6: Run focused route tests, all expense tests, and `npm run check` GREEN**
 
 - [ ] **Step 7: Commit Task 6 as `Add expense history and lifecycle screens`**
 
