@@ -2,7 +2,9 @@ import pdfMake from 'pdfmake/build/pdfmake';
 import * as vfsModule from 'pdfmake/build/vfs_fonts';
 import type { TDocumentDefinitions } from 'pdfmake/interfaces';
 import type { FinalizedSnapshot } from '../types';
+import type { ExpenseSnapshot } from '../expense/types';
 import { buildInvoiceDoc } from './invoiceDoc';
+import { buildExpenseDoc } from './expenseDoc';
 import { buildSummaryDoc, type SummaryInput } from './yearSummaryDoc';
 import { getInvoiceFolder } from '../stores/prefs';
 
@@ -57,6 +59,11 @@ export function invoicePdfBytes(snap: FinalizedSnapshot): Promise<Uint8Array> {
   return docBytes(buildInvoiceDoc(snap));
 }
 
+/** Expense report PDF bytes (exposed for tests and visual verification). */
+export function expensePdfBytes(snapshot: ExpenseSnapshot): Promise<Uint8Array> {
+  return docBytes(buildExpenseDoc(snapshot));
+}
+
 /** Tax-summary PDF bytes (exposed for tests). */
 export function summaryPdfBytes(input: SummaryInput): Promise<Uint8Array> {
   return docBytes(buildSummaryDoc(input));
@@ -64,6 +71,14 @@ export function summaryPdfBytes(input: SummaryInput): Promise<Uint8Array> {
 
 export function saveInvoicePdf(snap: FinalizedSnapshot): Promise<SaveResult> {
   return savePdfDoc(buildInvoiceDoc(snap), `Invoice-${snap.invoiceNumber}.pdf`, `${snap.year}-invoices`);
+}
+
+export function saveExpensePdf(snapshot: ExpenseSnapshot): Promise<SaveResult> {
+  return savePdfDoc(
+    buildExpenseDoc(snapshot),
+    `Expense-Report-${snapshot.reportNumber}.pdf`,
+    `${snapshot.year}-expenses`,
+  );
 }
 
 export function saveSummaryPdf(input: SummaryInput, fileName: string): Promise<SaveResult> {

@@ -1,6 +1,7 @@
 import { test, expect, describe } from 'vitest';
-import { invoicePdfBytes, summaryPdfBytes } from './generate';
+import { expensePdfBytes, invoicePdfBytes, summaryPdfBytes } from './generate';
 import type { FinalizedSnapshot, LineItem } from '../types';
+import type { ExpenseSnapshot } from '../expense/types';
 
 function line(over: Partial<LineItem> = {}): LineItem {
   return {
@@ -38,6 +39,22 @@ describe('invoicePdfBytes', () => {
       rollup: { count: 3, totalBilledCents: 87236, totalTaxCents: 10036 },
       breakdown: [{ clientName: 'Globex Finance', count: 2, subtotalCents: 7600 }],
     });
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect(String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3])).toBe('%PDF');
+  });
+
+  test('expense report generates a non-empty PDF', async () => {
+    const expense: ExpenseSnapshot = {
+      reportNumber: '7-2026', seq: 7, year: 2026, reportDate: '2026-07-15',
+      periodStart: '2026-07-01', periodEnd: '2026-07-15',
+      inspectorName: 'Jane Tester', inspectorAddress: '123 Test Street',
+      inspectorNumber: '00000', logoDataUrl: '',
+      items: [{ position: 0, date: '2026-07-02', description: 'Fuel', amountCents: 5_000 }],
+      totalCents: 5_000,
+    };
+
+    const bytes = await expensePdfBytes(expense);
+
     expect(bytes.length).toBeGreaterThan(1000);
     expect(String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3])).toBe('%PDF');
   });

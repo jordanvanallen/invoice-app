@@ -143,7 +143,7 @@ expect(await userVersion(db)).toBe(4);
 
 - [x] **Step 8: Run repository, atomic transaction, and invoice regression tests GREEN**
 
-- [ ] **Step 9: Commit Task 3 as `Add expense report persistence lifecycle`**
+- [x] **Step 9: Commit Task 3 as `Add expense report persistence lifecycle`**
 
 ### Task 4: Expense PDF and Shared Finalized View
 
@@ -159,15 +159,15 @@ expect(await userVersion(db)).toBe(4);
 - Produces `expensePdfBytes(snapshot): Promise<Uint8Array>` and `saveExpensePdf(snapshot): Promise<SaveResult>`.
 - `ExpenseView` accepts one `ExpenseSnapshot` and renders the same identifying fields, rows, and total represented in the PDF.
 
-- [ ] **Step 1: Add a failing document test for business identity, report number/date/period, chronological table rows, amount formatting, total, and optional logo**
+- [x] **Step 1: Add a failing document test for business identity, report number/date/period, chronological table rows, amount formatting, total, and optional logo**
 
-- [ ] **Step 2: Run `npm test -- src/lib/pdf/expenseDoc.test.ts` and confirm RED**
+- [x] **Step 2: Run `npm test -- src/lib/pdf/expenseDoc.test.ts` and confirm RED**
 
-- [ ] **Step 3: Implement the focused pdfmake definition without invoice bill-to, HST, mileage, or payment fields**
+- [x] **Step 3: Implement the focused pdfmake definition without invoice bill-to, HST, mileage, or payment fields**
 
-- [ ] **Step 4: Add failing PDF byte-generation coverage, then wire `expensePdfBytes` and `saveExpensePdf` through the existing private PDF helpers**
+- [x] **Step 4: Add failing PDF byte-generation coverage, then wire `expensePdfBytes` and `saveExpensePdf` through the existing private PDF helpers**
 
-- [ ] **Step 5: Build `ExpenseView.svelte` from snapshot data only and run PDF tests GREEN**
+- [x] **Step 5: Build `ExpenseView.svelte` from snapshot data only and run PDF tests GREEN**
 
 - [ ] **Step 6: Commit Task 4 as `Add expense report snapshot PDF view`**
 
