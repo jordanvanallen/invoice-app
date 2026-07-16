@@ -440,7 +440,7 @@
   .money-input input { border: 0; outline: 0; }
   .del { width: 44px; height: var(--input-h); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--text-muted); cursor: pointer; }
   .del:hover { color: var(--red-600); border-color: var(--red-600); }
-  .add { margin: var(--sp-4); min-height: var(--target); padding: 0 var(--sp-4); border: 1px dashed var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--accent-strong); font-weight: 700; cursor: pointer; }
+  .add { width: 100%; min-height: 48px; border: none; border-top: 1px solid var(--border); background: var(--bg-surface); color: var(--accent-strong); font-size: var(--fs-base); font-weight: 600; cursor: pointer; }
   .add:hover { background: var(--accent-tint); }
   .dock { position: sticky; bottom: 0; margin: 0 calc(-1 * var(--sp-8)) calc(-1 * var(--sp-8)); display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); flex-wrap: wrap; padding: var(--sp-3) var(--sp-8); background: var(--bg-surface); border-top: 1px solid var(--border); box-shadow: 0 -4px 16px rgba(0,0,0,.08); }
   .total { display: flex; align-items: baseline; gap: var(--sp-3); font-size: var(--fs-xl); color: var(--accent-strong); }

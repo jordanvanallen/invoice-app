@@ -70,6 +70,17 @@ describe('expense report editor route', () => {
     expect(page).toContain('150px 44px;');
   });
 
+  test('uses the same full-width add-row control as invoices', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const invoiceSection = readFileSync('src/lib/components/InvoiceSection.svelte', 'utf8');
+    const sharedAddStyle = '.add { width: 100%; min-height: 48px; border: none; border-top: 1px solid var(--border); background: var(--bg-surface); color: var(--accent-strong); font-size: var(--fs-base); font-weight: 600; cursor: pointer; }';
+
+    expect(page).toContain('>+ Add an expense</button>');
+    expect(invoiceSection).toContain(sharedAddStyle);
+    expect(page).toContain(sharedAddStyle);
+    expect(page).not.toContain('.add { margin: var(--sp-4);');
+  });
+
   test('sorts the visible editor rows before building Preview', () => {
     const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
     const previewStart = page.indexOf('function openPreview()');
