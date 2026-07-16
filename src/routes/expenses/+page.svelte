@@ -367,7 +367,8 @@
             class="tnum" inputmode="decimal" bind:value={row.amountText}
             aria-label={`Expense ${index + 1} amount`} placeholder="0.00" onblur={() => normalizeAmount(row)} /></span>
         </label>
-        <button type="button" class="remove" onclick={() => removeExpense(row.uid)} aria-label={`Remove expense ${index + 1}`}>Remove</button>
+        <button type="button" class="del" title="Remove this row"
+          onclick={() => removeExpense(row.uid)} aria-label={`Remove expense ${index + 1}`}>✕</button>
       </div>
     {/each}
     <button id="expense-add-row" type="button" class="add" onclick={addExpense}>+ Add an expense</button>
@@ -431,13 +432,14 @@
   .secondary-button:hover:not(:disabled) { background: var(--accent-tint); }
   .secondary-button:disabled { opacity: .55; cursor: default; }
   .expenses { overflow: hidden; margin-bottom: 96px; }
-  .row { display: grid; grid-template-columns: calc(220px * var(--fs-scale)) minmax(220px, 1fr) 170px 100px; gap: var(--sp-3); align-items: end; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
+  .row { display: grid; grid-template-columns: calc(220px * var(--fs-scale)) minmax(220px, 1fr) 170px 44px; gap: var(--sp-3); align-items: end; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
   .row-head { color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 700; align-items: center; padding-top: var(--sp-2); padding-bottom: var(--sp-2); }
   .mobile-label { display: none; }
   .money-input { display: flex; align-items: center; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); padding-left: var(--sp-3); color: var(--text-secondary); }
   .money-input:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
   .money-input input { border: 0; outline: 0; }
-  .remove { min-height: var(--target); border: 0; background: transparent; color: var(--red-600); text-decoration: underline; cursor: pointer; }
+  .del { width: 44px; height: var(--input-h); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--text-muted); cursor: pointer; }
+  .del:hover { color: var(--red-600); border-color: var(--red-600); }
   .add { margin: var(--sp-4); min-height: var(--target); padding: 0 var(--sp-4); border: 1px dashed var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--accent-strong); font-weight: 700; cursor: pointer; }
   .add:hover { background: var(--accent-tint); }
   .dock { position: sticky; bottom: 0; margin: 0 calc(-1 * var(--sp-8)) calc(-1 * var(--sp-8)); display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); flex-wrap: wrap; padding: var(--sp-3) var(--sp-8); background: var(--bg-surface); border-top: 1px solid var(--border); box-shadow: 0 -4px 16px rgba(0,0,0,.08); }
@@ -452,14 +454,14 @@
   .preview-bar { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); background: var(--bg-surface); color: var(--text-secondary); }
   .preview-body { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-6); display: flex; justify-content: center; align-items: flex-start; }
   @media (max-width: 1000px) {
-    .row { grid-template-columns: calc(200px * var(--fs-scale)) minmax(160px, 1fr) 150px 90px; }
+    .row { grid-template-columns: calc(200px * var(--fs-scale)) minmax(160px, 1fr) 150px 44px; }
   }
   @media (max-width: 760px) {
     .head { flex-wrap: wrap; }
     .row-head { display: none; }
     .row { grid-template-columns: 1fr; align-items: stretch; padding: var(--sp-4); }
     .mobile-label { display: inline; }
-    .remove { justify-self: start; }
+    .del { justify-self: start; }
     .dock { margin-left: calc(-1 * var(--sp-4)); margin-right: calc(-1 * var(--sp-4)); padding: var(--sp-3) var(--sp-4); }
     .actions { width: 100%; }
     .fix { max-width: none; text-align: left; }

@@ -60,6 +60,16 @@ describe('expense report editor route', () => {
     expect(mobileStyles).toContain('.head { flex-wrap: wrap; }');
   });
 
+  test('uses the same compact row-removal control as invoices', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+
+    expect(page).toContain('class="del" title="Remove this row"');
+    expect(page).toContain('>✕</button>');
+    expect(page).not.toContain('>Remove</button>');
+    expect(page).toContain('170px 44px;');
+    expect(page).toContain('150px 44px;');
+  });
+
   test('sorts the visible editor rows before building Preview', () => {
     const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
     const previewStart = page.indexOf('function openPreview()');
