@@ -18,6 +18,35 @@ describe('expense report editor route', () => {
     expect(page).toContain('finalizeExpenseReport');
   });
 
+  test('matches the invoice editor hierarchy for shared document fields', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const headStart = page.indexOf('<div class="head">');
+    const periodStart = page.indexOf('<div class="period">');
+    const rowsStart = page.indexOf('<div class="row-tools">');
+    const head = page.slice(headStart, periodStart);
+    const period = page.slice(periodStart, rowsStart);
+
+    expect(headStart).toBeGreaterThan(-1);
+    expect(head).toContain('New Expense Report');
+    expect(head).toContain('StatusPill status="draft"');
+    expect(head).toContain('Expense report #');
+    expect(head).toContain('expense-sequence-help');
+    expect(head).toContain('SaveStatusChip');
+    expect(period.indexOf('Reporting period')).toBeGreaterThan(-1);
+    expect(period.indexOf('Reporting period')).toBeLessThan(period.indexOf('Report date'));
+    expect(period).toContain('<span class="dates">');
+    expect(page).not.toContain('class="card report-details"');
+  });
+
+  test('shows row-order guidance contextually instead of below the page title', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+
+    expect(page).toContain('const showExpenseHint = $derived(');
+    expect(page).toContain('{#if showExpenseHint}');
+    expect(page).toContain('class="empty-hint"');
+    expect(page).not.toContain('<p class="muted">Your work saves automatically.');
+  });
+
   test('sorts the visible editor rows before building Preview', () => {
     const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
     const previewStart = page.indexOf('function openPreview()');

@@ -6,6 +6,7 @@
   import DatePicker from '$lib/components/DatePicker.svelte';
   import ExpenseView from '$lib/components/ExpenseView.svelte';
   import SaveStatusChip from '$lib/components/SaveStatusChip.svelte';
+  import StatusPill from '$lib/components/StatusPill.svelte';
   import { getDb } from '$lib/db';
   import {
     createExpenseDraft,
@@ -225,6 +226,9 @@
   const totalCents = $derived(expenseTotal(draftForDisplay.items));
   const blockers = $derived(expenseFinalizeBlockers(draftForDisplay));
   const canFinalize = $derived(blockers.length === 0 && sequenceState.status === 'ready');
+  const showExpenseHint = $derived(
+    rows.every((row) => !row.description.trim() && !row.amountText.trim()),
+  );
 
   let showPreview = $state(false);
   let previewSnapshot = $state<ExpenseSnapshot | null>(null);
@@ -310,35 +314,38 @@
     </div>
   </section>
 {:else}
-  <header class="page-head">
-    <div>
-      <h1>New Expense Report</h1>
-      <p class="muted">Your work saves automatically. Rows stay where you put them until you sort or finish.</p>
-    </div>
-    <div class="head-status"><span class="draft-pill">DRAFT</span><SaveStatusChip state={saveState} {savedAt} /></div>
-  </header>
+  <div class="head">
+    <h1>New Expense Report</h1>
+    <StatusPill status="draft" />
+    <label class="expense-number" for="expense-sequence">
+      <span>Expense report #</span>
+      <input id="expense-sequence" class:warn={sequenceState.status === 'invalid'}
+        inputmode="numeric" bind:value={sequenceText} aria-describedby="expense-sequence-help" />
+      <span>- {reportYear()}</span>
+    </label>
+    <span id="expense-sequence-help" class:warn-msg={sequenceState.status === 'invalid'} class="seq-msg">
+      {sequenceState.message || sequenceState.helperMessage || `Will be #${sequenceState.draftSeq ?? ''}-${reportYear()}`}
+    </span>
+    <span class="spacer"></span>
+    <SaveStatusChip state={saveState} {savedAt} />
+  </div>
 
-  <section class="card report-details" aria-label="Expense report details">
-    <label class="number-field" for="expense-sequence">Expense report #
-      <span class="number-input">
-        <input id="expense-sequence" class:warn={sequenceState.status === 'invalid'}
-          inputmode="numeric" bind:value={sequenceText} aria-describedby="expense-sequence-help" />
-        <span>- {reportYear()}</span>
-      </span>
-      <span id="expense-sequence-help" class:warn-text={sequenceState.status === 'invalid'} class="help">
-        {sequenceState.message || sequenceState.helperMessage || `Will be #${sequenceState.draftSeq ?? ''}-${reportYear()}`}
+  <div class="period">
+    <label>Reporting period
+      <span class="dates">
+        <span id="expense-period-start"><DatePicker bind:value={periodStart} ariaLabel="Reporting period start" /></span>
+        <span>to</span>
+        <span id="expense-period-end"><DatePicker bind:value={periodEnd} ariaLabel="Reporting period end" /></span>
       </span>
     </label>
     <label>Report date
-      <span id="expense-report-date"><DatePicker bind:value={reportDate} ariaLabel="Expense report date" block /></span>
+      <span id="expense-report-date"><DatePicker bind:value={reportDate} ariaLabel="Expense report date" /></span>
     </label>
-    <label>Reporting period start
-      <span id="expense-period-start"><DatePicker bind:value={periodStart} ariaLabel="Reporting period start" block /></span>
-    </label>
-    <label>Reporting period end
-      <span id="expense-period-end"><DatePicker bind:value={periodEnd} ariaLabel="Reporting period end" block /></span>
-    </label>
-  </section>
+  </div>
+
+  {#if showExpenseHint}
+    <p class="empty-hint">Add your expenses below. Rows stay where you put them until you sort, preview, or finish.</p>
+  {/if}
 
   <div class="row-tools">
     <button type="button" class="secondary-button" disabled={rows.length < 2} onclick={sortExpenseRows}>Sort rows by date</button>
@@ -404,21 +411,22 @@
 <style>
   h1 { margin: 0; font-size: var(--fs-xl); }
   .muted { margin: 0; color: var(--text-secondary); }
-  .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-4); margin-bottom: var(--sp-6); }
-  .head-status { display: flex; align-items: center; gap: var(--sp-2); }
-  .draft-pill, .finalized-pill { display: inline-flex; align-items: center; min-height: 36px; padding: 0 var(--sp-3); border-radius: var(--r-full); font-size: var(--fs-sm); font-weight: 700; }
-  .draft-pill { background: var(--amber-50); color: var(--amber-600); }
+  .head { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+  .head .spacer { flex: 1; }
+  .finalized-pill { display: inline-flex; align-items: center; min-height: 36px; padding: 0 var(--sp-3); border-radius: var(--r-full); font-size: var(--fs-sm); font-weight: 700; }
   .finalized-pill { background: var(--accent-tint); color: var(--accent-strong); }
   .card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-card); }
-  .report-details { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-4); padding: var(--sp-4); }
   label { display: flex; flex-direction: column; gap: var(--sp-2); color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 600; }
   input { width: 100%; min-height: var(--input-h); padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); }
   input.warn { border-color: var(--amber-600); border-left-width: 3px; }
-  .number-input { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-primary); }
-  .number-input input { max-width: 110px; }
-  .help { min-height: 1.5em; color: var(--text-muted); font-weight: 400; }
-  .help.warn-text { color: var(--amber-600); }
-  .row-tools { display: flex; justify-content: flex-end; margin: var(--sp-4) 0 var(--sp-3); }
+  .expense-number { flex-direction: row; align-items: center; gap: var(--sp-2); }
+  .expense-number input { width: 72px; padding: 0 10px; font-size: var(--fs-base); }
+  .seq-msg { color: var(--text-muted); font-size: var(--fs-sm); }
+  .seq-msg.warn-msg { color: var(--amber-600); }
+  .period { display: flex; gap: var(--sp-8); margin-bottom: var(--sp-6); flex-wrap: wrap; }
+  .period .dates { display: flex; align-items: center; gap: var(--sp-2); }
+  .empty-hint { margin: 0 0 var(--sp-4); padding: var(--sp-3) var(--sp-4); background: var(--accent-tint); color: var(--text-secondary); border-radius: var(--r-md); font-size: var(--fs-sm); }
+  .row-tools { display: flex; justify-content: flex-end; margin: 0 0 var(--sp-3); }
   .secondary-button { min-height: var(--target); padding: 0 var(--sp-4); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); font-weight: 600; cursor: pointer; }
   .secondary-button:hover:not(:disabled) { background: var(--accent-tint); }
   .secondary-button:disabled { opacity: .55; cursor: default; }
@@ -444,12 +452,9 @@
   .preview-bar { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); background: var(--bg-surface); color: var(--text-secondary); }
   .preview-body { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-6); display: flex; justify-content: center; align-items: flex-start; }
   @media (max-width: 1000px) {
-    .report-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .row { grid-template-columns: 170px minmax(200px, 1fr) 150px 90px; }
   }
   @media (max-width: 760px) {
-    .page-head { flex-direction: column; }
-    .report-details { grid-template-columns: 1fr; }
     .row-head { display: none; }
     .row { grid-template-columns: 1fr; align-items: stretch; padding: var(--sp-4); }
     .mobile-label { display: inline; }
