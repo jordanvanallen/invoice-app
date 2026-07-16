@@ -47,6 +47,19 @@ describe('expense report editor route', () => {
     expect(page).not.toContain('<p class="muted">Your work saves automatically.');
   });
 
+  test('keeps formatted row dates on one line with a text-scale-aware column', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const datePicker = readFileSync('src/lib/components/DatePicker.svelte', 'utf8');
+
+    expect(datePicker).toContain('.field > span { white-space: nowrap; }');
+    expect(page).toContain('grid-template-columns: calc(220px * var(--fs-scale))');
+    expect(page).toContain('grid-template-columns: calc(200px * var(--fs-scale))');
+    expect(page).toContain('@media (max-width: 760px)');
+    expect(page).toContain('.row { grid-template-columns: 1fr;');
+    const mobileStyles = page.slice(page.indexOf('@media (max-width: 760px)'));
+    expect(mobileStyles).toContain('.head { flex-wrap: wrap; }');
+  });
+
   test('sorts the visible editor rows before building Preview', () => {
     const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
     const previewStart = page.indexOf('function openPreview()');

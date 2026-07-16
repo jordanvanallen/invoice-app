@@ -158,6 +158,7 @@
   }
   .field:hover { background: var(--accent-tint); }
   .field:focus-visible { outline: 2px solid var(--accent-fill); outline-offset: 1px; }
+  .field > span { white-space: nowrap; }
   .field .placeholder { color: var(--text-muted); }
   .field svg { flex-shrink: 0; color: var(--text-secondary); }
 
