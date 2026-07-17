@@ -27,6 +27,29 @@ describe('expense editor helpers', () => {
     expect(draft.items.map((row) => row.description)).toEqual(['Parking', 'Fuel']);
   });
 
+  test('keeps Preview available while targeting an out-of-range second row', () => {
+    const rangeDraft: ExpenseDraft = {
+      seq: 4,
+      year: 2026,
+      reportDate: '2026-07-15',
+      periodStart: '2026-07-01',
+      periodEnd: '2026-07-15',
+      items: [
+        { position: 0, date: '2026-07-10', description: 'Parking', amountCents: 1_250 },
+        { position: 1, date: '2026-07-16', description: 'Fuel', amountCents: 5_000 },
+      ],
+    };
+
+    expect(firstExpenseBlockerTarget(rangeDraft)).toEqual({
+      id: 'expense-row-1-date',
+      message: 'Expense 2 date must be between Jul 1, 2026 and Jul 15, 2026.',
+    });
+
+    const preview = prepareExpensePreview(rangeDraft, settings, 4);
+    expect(preview.items.map((entry) => entry.description)).toEqual(['Parking', 'Fuel']);
+    expect(rangeDraft.items.map((entry) => entry.description)).toEqual(['Parking', 'Fuel']);
+  });
+
   test('points to the first header or row field that blocks finalization', () => {
     const draft: ExpenseDraft = {
       seq: 4, year: 2026, reportDate: '', periodStart: '', periodEnd: '',

@@ -30,6 +30,46 @@ describe('expense validation', () => {
     expect(expenseFinalizeBlockers(draft())).toEqual([]);
   });
 
+  test('blocks dates before and after the reporting period in displayed row order', () => {
+    expect(expenseFinalizeBlockers(draft({
+      items: [
+        row({ position: 0, date: '2026-06-30', description: '', amountCents: 0 }),
+        row({ position: 1, date: '2026-07-16' }),
+      ],
+    }))).toEqual([
+      { field: 'date', itemIndex: 0, message: 'Expense 1 date must be between Jul 1, 2026 and Jul 15, 2026.' },
+      { field: 'description', itemIndex: 0, message: 'Enter a description for expense 1.' },
+      { field: 'amountCents', itemIndex: 0, message: 'Enter an amount greater than $0.00 for expense 1.' },
+      { field: 'date', itemIndex: 1, message: 'Expense 2 date must be between Jul 1, 2026 and Jul 15, 2026.' },
+    ]);
+  });
+
+  test('accepts dates equal to both inclusive reporting-period boundaries', () => {
+    expect(expenseFinalizeBlockers(draft({
+      items: [row({ date: '2026-07-01' }), row({ position: 1, date: '2026-07-15' })],
+    }))).toEqual([]);
+  });
+
+  test('validates header dates before row range and emits one date blocker per field', () => {
+    expect(expenseFinalizeBlockers(draft({
+      reportDate: '2026-02-30',
+      periodStart: '2026-7-01',
+      periodEnd: 'not-a-date',
+      items: [row({ date: '2026-07-30' })],
+    }))).toEqual([
+      { field: 'reportDate', itemIndex: null, message: 'Choose a valid report date.' },
+      { field: 'periodStart', itemIndex: null, message: 'Choose a valid reporting period start date.' },
+      { field: 'periodEnd', itemIndex: null, message: 'Choose a valid reporting period end date.' },
+    ]);
+
+    expect(expenseFinalizeBlockers(draft({ items: [row({ date: '   ' })] }))).toEqual([
+      { field: 'date', itemIndex: 0, message: 'Choose a date for expense 1.' },
+    ]);
+    expect(expenseFinalizeBlockers(draft({ items: [row({ date: '2026-02-30' })] }))).toEqual([
+      { field: 'date', itemIndex: 0, message: 'Choose a valid date for expense 1.' },
+    ]);
+  });
+
   test('returns plain-language header and row blockers in focus order', () => {
     expect(expenseFinalizeBlockers(draft({
       seq: 0,

@@ -1,4 +1,5 @@
 import type { ExpenseBlocker, ExpenseDraft, ExpenseItem } from './types';
+import { formatIsoDate, isDateOutsidePeriod, isValidIsoDate } from '../validation';
 
 export function expenseTotal(items: readonly ExpenseItem[]): number {
   return items.reduce((sum, item) => sum + item.amountCents, 0);
@@ -12,34 +13,68 @@ export function expenseFinalizeBlockers(draft: ExpenseDraft): ExpenseBlocker[] {
       message: 'Enter a positive expense report number.',
     });
   }
-  if (!draft.reportDate) {
+  const reportDateValid = isValidIsoDate(draft.reportDate);
+  if (!draft.reportDate.trim()) {
     blockers.push({ field: 'reportDate', itemIndex: null, message: 'Choose a report date.' });
+  } else if (!reportDateValid) {
+    blockers.push({ field: 'reportDate', itemIndex: null, message: 'Choose a valid report date.' });
   }
-  if (!draft.periodStart) {
+
+  const periodStartValid = isValidIsoDate(draft.periodStart);
+  const periodEndValid = isValidIsoDate(draft.periodEnd);
+
+  if (!draft.periodStart.trim()) {
     blockers.push({
       field: 'periodStart', itemIndex: null,
       message: 'Choose a reporting period start date.',
     });
+  } else if (!periodStartValid) {
+    blockers.push({
+      field: 'periodStart', itemIndex: null,
+      message: 'Choose a valid reporting period start date.',
+    });
   }
-  if (!draft.periodEnd) {
+  if (!draft.periodEnd.trim()) {
     blockers.push({
       field: 'periodEnd', itemIndex: null,
       message: 'Choose a reporting period end date.',
     });
-  } else if (draft.periodStart && draft.periodStart > draft.periodEnd) {
+  } else if (!periodEndValid) {
+    blockers.push({
+      field: 'periodEnd', itemIndex: null,
+      message: 'Choose a valid reporting period end date.',
+    });
+  } else if (periodStartValid && draft.periodStart > draft.periodEnd) {
     blockers.push({
       field: 'periodEnd', itemIndex: null,
       message: 'The reporting period end must be on or after its start.',
     });
   }
+
+  const periodAllowsRows = periodStartValid
+    && periodEndValid
+    && draft.periodStart <= draft.periodEnd;
+
   if (draft.items.length === 0) {
     blockers.push({ field: 'items', itemIndex: null, message: 'Add at least one expense.' });
   }
   draft.items.forEach((item, itemIndex) => {
-    if (!item.date) {
+    if (!item.date.trim()) {
       blockers.push({
         field: 'date', itemIndex,
         message: `Choose a date for expense ${itemIndex + 1}.`,
+      });
+    } else if (!isValidIsoDate(item.date)) {
+      blockers.push({
+        field: 'date', itemIndex,
+        message: `Choose a valid date for expense ${itemIndex + 1}.`,
+      });
+    } else if (periodAllowsRows && isDateOutsidePeriod(
+      item.date, draft.periodStart, draft.periodEnd,
+    )) {
+      blockers.push({
+        field: 'date', itemIndex,
+        message: `Expense ${itemIndex + 1} date must be between ${formatIsoDate(draft.periodStart)} and ${formatIsoDate(draft.periodEnd)}.`,
       });
     }
     if (!item.description.trim()) {

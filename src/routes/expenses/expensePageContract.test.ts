@@ -16,6 +16,9 @@ describe('expense report editor route', () => {
     expect(page).toContain('Lock &amp; Save');
     expect(page).toContain('settleAutosaveBeforeManualSave');
     expect(page).toContain('finalizeExpenseReport');
+    expect(page).toContain('const blockers = $derived(expenseFinalizeBlockers(draftForDisplay));');
+    expect(page).toContain('const canFinalize = $derived(blockers.length === 0');
+    expect(page).toContain('disabled={!canFinalize}>Lock &amp; Save</BigButton>');
   });
 
   test('matches the invoice editor hierarchy for shared document fields', () => {
@@ -88,6 +91,8 @@ describe('expense report editor route', () => {
     const previewHandler = page.slice(previewStart, previewEnd);
 
     expect(previewStart).toBeGreaterThan(-1);
+    expect(previewHandler).not.toContain('blockers');
+    expect(previewHandler).not.toContain('canFinalize');
     expect(previewHandler.indexOf('sortExpenseRows();')).toBeGreaterThan(-1);
     expect(previewHandler.indexOf('sortExpenseRows();')).toBeLessThan(
       previewHandler.indexOf('prepareExpensePreview('),
