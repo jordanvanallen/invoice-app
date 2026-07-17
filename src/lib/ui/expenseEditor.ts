@@ -44,14 +44,26 @@ export function firstExpenseBlockerTarget(draft: ExpenseDraft): ExpenseBlockerTa
   return { id: ids[blocker.field] ?? 'expense-add-row', message: blocker.message };
 }
 
-/** Select the shared out-of-range warning for one displayed expense row. */
-export function expenseRowDateRangeWarning(
+function rowWarningMessage(blocker: ExpenseBlocker): string {
+  if (blocker.field === 'description') return 'Enter a description';
+  if (blocker.field === 'amountCents') return 'Enter an amount greater than $0.00';
+  if (blocker.field === 'date') {
+    if (blocker.message === EXPENSE_DATE_OUTSIDE_PERIOD_MESSAGE) {
+      return EXPENSE_DATE_OUTSIDE_PERIOD_MESSAGE;
+    }
+    return blocker.message.startsWith('Choose a valid date')
+      ? 'Choose a valid date'
+      : 'Choose a date';
+  }
+  return blocker.message;
+}
+
+/** Select concise display messages for every blocker on one expense row. */
+export function expenseRowWarnings(
   blockers: readonly ExpenseBlocker[],
   itemIndex: number,
-): string | null {
-  return blockers.find((blocker) =>
-    blocker.field === 'date'
-      && blocker.itemIndex === itemIndex
-      && blocker.message === EXPENSE_DATE_OUTSIDE_PERIOD_MESSAGE
-  )?.message ?? null;
+): string[] {
+  return blockers
+    .filter((blocker) => blocker.itemIndex === itemIndex)
+    .map(rowWarningMessage);
 }

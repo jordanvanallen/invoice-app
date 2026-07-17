@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   expenseBlockingRowCount,
-  expenseRowDateRangeWarning,
+  expenseRowWarnings,
   firstExpenseBlockerTarget,
   prepareExpensePreview,
 } from './expenseEditor';
@@ -51,16 +51,16 @@ describe('expense editor helpers', () => {
       id: 'expense-row-1-date',
       message: 'Date is outside the reporting period',
     });
-    expect(expenseRowDateRangeWarning(blockers, 0)).toBeNull();
-    expect(expenseRowDateRangeWarning(blockers, 1)).toBe('Date is outside the reporting period');
-    expect(expenseRowDateRangeWarning(blockers, 2)).toBeNull();
+    expect(expenseRowWarnings(blockers, 0)).toEqual([]);
+    expect(expenseRowWarnings(blockers, 1)).toEqual(['Date is outside the reporting period']);
+    expect(expenseRowWarnings(blockers, 2)).toEqual([]);
 
     const preview = prepareExpensePreview(rangeDraft, settings, 4);
     expect(preview.items.map((entry) => entry.description)).toEqual(['Parking', 'Fuel']);
     expect(rangeDraft.items.map((entry) => entry.description)).toEqual(['Parking', 'Fuel']);
   });
 
-  test('returns a warning for every out-of-range row and ignores other date blockers', () => {
+  test('returns every row blocker in validation order with concise display copy', () => {
     const rangeDraft: ExpenseDraft = {
       seq: 4, year: 2026, reportDate: '2026-07-15',
       periodStart: '2026-07-01', periodEnd: '2026-07-15',
@@ -72,10 +72,32 @@ describe('expense editor helpers', () => {
     };
     const blockers = expenseFinalizeBlockers(rangeDraft);
 
-    expect(expenseRowDateRangeWarning(blockers, 0)).toBe('Date is outside the reporting period');
-    expect(expenseRowDateRangeWarning(blockers, 1)).toBe('Date is outside the reporting period');
-    expect(expenseRowDateRangeWarning(blockers, 2)).toBeNull();
+    expect(expenseRowWarnings(blockers, 0)).toEqual([
+      'Date is outside the reporting period',
+      'Enter a description',
+      'Enter an amount greater than $0.00',
+    ]);
+    expect(expenseRowWarnings(blockers, 1)).toEqual([
+      'Date is outside the reporting period',
+    ]);
+    expect(expenseRowWarnings(blockers, 2)).toEqual(['Choose a date']);
     expect(expenseBlockingRowCount(blockers)).toBe(3);
+  });
+
+  test('shows a blank description warning on its affected row', () => {
+    const descriptionDraft: ExpenseDraft = {
+      seq: 4, year: 2026, reportDate: '2026-07-15',
+      periodStart: '2026-07-01', periodEnd: '2026-07-15',
+      items: [
+        { position: 0, date: '2026-07-10', description: 'Fuel', amountCents: 5_000 },
+        { position: 1, date: '2026-07-15', description: '', amountCents: 250 },
+      ],
+    };
+    const blockers = expenseFinalizeBlockers(descriptionDraft);
+
+    expect(expenseRowWarnings(blockers, 0)).toEqual([]);
+    expect(expenseRowWarnings(blockers, 1)).toEqual(['Enter a description']);
+    expect(expenseBlockingRowCount(blockers)).toBe(1);
   });
 
   test('points to the first header or row field that blocks finalization', () => {

@@ -35,7 +35,7 @@
   import { defaultInvoicePeriod } from '$lib/ui/date';
   import {
     expenseBlockingRowCount,
-    expenseRowDateRangeWarning,
+    expenseRowWarnings,
     firstExpenseBlockerTarget,
     prepareExpensePreview,
   } from '$lib/ui/expenseEditor';
@@ -360,7 +360,7 @@
   <section class="card expenses" aria-label="Expense rows">
     <div class="row row-head" aria-hidden="true"><span>Date</span><span>Description</span><span>Amount</span><span></span></div>
     {#each rows as row, index (row.uid)}
-      {@const dateRangeWarning = expenseRowDateRangeWarning(blockers, index)}
+      {@const rowWarnings = expenseRowWarnings(blockers, index)}
       <div class="row" id="expense-row-{index}">
         <label><span class="mobile-label">Date</span>
           <span id="expense-row-{index}-date"><DatePicker bind:value={row.date} ariaLabel={`Expense ${index + 1} date`} block /></span>
@@ -376,8 +376,10 @@
         </label>
         <button type="button" class="del" title="Remove this row"
           onclick={() => removeExpense(row.uid)} aria-label={`Remove expense ${index + 1}`}>✕</button>
-        {#if dateRangeWarning}
-          <div class="warns"><span>⚠ {dateRangeWarning}</span></div>
+        {#if rowWarnings.length}
+          <div class="warns">
+            {#each rowWarnings as warning}<span>⚠ {warning}</span>{/each}
+          </div>
         {/if}
       </div>
     {/each}
