@@ -42,6 +42,25 @@ export function findDuplicates(lines: LineItem[]): DuplicateReport {
   };
 }
 
+const SHORT_MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+] as const;
+
+/** A canonical YYYY-MM-DD string that represents a real calendar date. */
+export function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+/** Deterministic display label for a validated ISO date. */
+export function formatIsoDate(value: string): string {
+  if (!isValidIsoDate(value)) return value;
+  const [year, month, day] = value.split('-').map(Number);
+  return `${SHORT_MONTHS[month - 1]} ${day}, ${year}`;
+}
+
 /** ISO date strings compare correctly with simple string comparison. */
 export function isDateOutsidePeriod(date: string, start: string, end: string): boolean {
   return date < start || date > end;

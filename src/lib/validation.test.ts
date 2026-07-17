@@ -1,7 +1,7 @@
 import { test, expect, describe } from 'vitest';
 import {
   normalizeVin8, isValidVin8, missingFinalizeFields,
-  findDuplicates, isDateOutsidePeriod,
+  findDuplicates, isValidIsoDate, formatIsoDate, isDateOutsidePeriod,
   isValidHstNumber, isValidEmail, isValidTaxPercent, isValidDollars,
   businessFieldErrors, hasNoErrors, type BusinessFields,
 } from './validation';
@@ -55,6 +55,28 @@ describe('findDuplicates (within one invoice)', () => {
   test('no duplicates returns empty arrays', () => {
     expect(findDuplicates([line({ inspectionNumber: '1', vin8: 'AAAA1111' })]))
       .toEqual({ inspectionNumbers: [], vin8s: [] });
+  });
+});
+
+describe('isValidIsoDate / formatIsoDate', () => {
+  test('accepts canonical real dates including leap day', () => {
+    expect(isValidIsoDate('2026-02-28')).toBe(true);
+    expect(isValidIsoDate('2024-02-29')).toBe(true);
+  });
+
+  test('rejects blank, non-canonical, impossible, and arbitrary values', () => {
+    expect(isValidIsoDate('')).toBe(false);
+    expect(isValidIsoDate('   ')).toBe(false);
+    expect(isValidIsoDate('2026-7-01')).toBe(false);
+    expect(isValidIsoDate('2026-02-29')).toBe(false);
+    expect(isValidIsoDate('2026-02-30')).toBe(false);
+    expect(isValidIsoDate('2026-13-01')).toBe(false);
+    expect(isValidIsoDate('not-a-date')).toBe(false);
+  });
+
+  test('formats a validated ISO date without timezone conversion', () => {
+    expect(formatIsoDate('2026-07-01')).toBe('Jul 1, 2026');
+    expect(formatIsoDate('2026-12-15')).toBe('Dec 15, 2026');
   });
 });
 
