@@ -1,5 +1,7 @@
 import type { ExpenseBlocker, ExpenseDraft, ExpenseItem } from './types';
-import { formatIsoDate, isDateOutsidePeriod, isValidIsoDate } from '../validation';
+import { isDateOutsidePeriod, isValidIsoDate } from '../validation';
+
+export const EXPENSE_DATE_OUTSIDE_PERIOD_MESSAGE = 'Date is outside the reporting period';
 
 export function expenseTotal(items: readonly ExpenseItem[]): number {
   return items.reduce((sum, item) => sum + item.amountCents, 0);
@@ -74,7 +76,7 @@ export function expenseFinalizeBlockers(draft: ExpenseDraft): ExpenseBlocker[] {
     )) {
       blockers.push({
         field: 'date', itemIndex,
-        message: `Expense ${itemIndex + 1} date must be between ${formatIsoDate(draft.periodStart)} and ${formatIsoDate(draft.periodEnd)}.`,
+        message: EXPENSE_DATE_OUTSIDE_PERIOD_MESSAGE,
       });
     }
     if (!item.description.trim()) {

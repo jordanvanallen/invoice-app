@@ -37,10 +37,10 @@ describe('expense validation', () => {
         row({ position: 1, date: '2026-07-16' }),
       ],
     }))).toEqual([
-      { field: 'date', itemIndex: 0, message: 'Expense 1 date must be between Jul 1, 2026 and Jul 15, 2026.' },
+      { field: 'date', itemIndex: 0, message: 'Date is outside the reporting period' },
       { field: 'description', itemIndex: 0, message: 'Enter a description for expense 1.' },
       { field: 'amountCents', itemIndex: 0, message: 'Enter an amount greater than $0.00 for expense 1.' },
-      { field: 'date', itemIndex: 1, message: 'Expense 2 date must be between Jul 1, 2026 and Jul 15, 2026.' },
+      { field: 'date', itemIndex: 1, message: 'Date is outside the reporting period' },
     ]);
   });
 

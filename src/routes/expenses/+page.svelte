@@ -33,7 +33,12 @@
     type AutosaveController,
   } from '$lib/ui/autosave';
   import { defaultInvoicePeriod } from '$lib/ui/date';
-  import { firstExpenseBlockerTarget, prepareExpensePreview } from '$lib/ui/expenseEditor';
+  import {
+    expenseBlockingRowCount,
+    expenseRowDateRangeWarning,
+    firstExpenseBlockerTarget,
+    prepareExpensePreview,
+  } from '$lib/ui/expenseEditor';
   import {
     expenseSeqForPersistence,
     resolveExpenseSequenceState,
@@ -225,6 +230,7 @@
   const draftForDisplay = $derived(buildDraft());
   const totalCents = $derived(expenseTotal(draftForDisplay.items));
   const blockers = $derived(expenseFinalizeBlockers(draftForDisplay));
+  const blockingRowCount = $derived(expenseBlockingRowCount(blockers));
   const canFinalize = $derived(blockers.length === 0 && sequenceState.status === 'ready');
   const showExpenseHint = $derived(
     rows.every((row) => !row.description.trim() && !row.amountText.trim()),
@@ -354,6 +360,7 @@
   <section class="card expenses" aria-label="Expense rows">
     <div class="row row-head" aria-hidden="true"><span>Date</span><span>Description</span><span>Amount</span><span></span></div>
     {#each rows as row, index (row.uid)}
+      {@const dateRangeWarning = expenseRowDateRangeWarning(blockers, index)}
       <div class="row" id="expense-row-{index}">
         <label><span class="mobile-label">Date</span>
           <span id="expense-row-{index}-date"><DatePicker bind:value={row.date} ariaLabel={`Expense ${index + 1} date`} block /></span>
@@ -369,6 +376,9 @@
         </label>
         <button type="button" class="del" title="Remove this row"
           onclick={() => removeExpense(row.uid)} aria-label={`Remove expense ${index + 1}`}>✕</button>
+        {#if dateRangeWarning}
+          <div class="warns"><span>⚠ {dateRangeWarning}</span></div>
+        {/if}
       </div>
     {/each}
     <button id="expense-add-row" type="button" class="add" onclick={addExpense}>+ Add an expense</button>
@@ -378,7 +388,11 @@
     <div class="total"><span>Total</span><b class="tnum">{formatDollars(totalCents)}</b></div>
     <div class="actions">
       {#if blockers.length > 0}
-        <button type="button" class="fix" onclick={jumpToFirstBlocker}>{blockers[0].message} Fix it →</button>
+        {#if blockers[0].itemIndex !== null}
+          <button type="button" class="fix" onclick={jumpToFirstBlocker}>Fix {blockingRowCount} {blockingRowCount === 1 ? 'row' : 'rows'} to finish →</button>
+        {:else}
+          <button type="button" class="fix" onclick={jumpToFirstBlocker}>{blockers[0].message} Fix it →</button>
+        {/if}
       {/if}
       <BigButton variant="secondary" onclick={openPreview}
         disabled={rows.length === 0 || sequenceState.status !== 'ready'}>Preview</BigButton>
@@ -442,6 +456,8 @@
   .del:hover { color: var(--red-600); border-color: var(--red-600); }
   .add { width: 100%; min-height: 48px; border: none; border-top: 1px solid var(--border); background: var(--bg-surface); color: var(--accent-strong); font-size: var(--fs-base); font-weight: 600; cursor: pointer; }
   .add:hover { background: var(--accent-tint); }
+  .warns { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--sp-3); padding-top: var(--sp-1); }
+  .warns span { color: var(--amber-600); font-size: var(--fs-sm); }
   .dock { position: sticky; bottom: 0; margin: 0 calc(-1 * var(--sp-8)) calc(-1 * var(--sp-8)); display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); flex-wrap: wrap; padding: var(--sp-3) var(--sp-8); background: var(--bg-surface); border-top: 1px solid var(--border); box-shadow: 0 -4px 16px rgba(0,0,0,.08); }
   .total { display: flex; align-items: baseline; gap: var(--sp-3); font-size: var(--fs-xl); color: var(--accent-strong); }
   .actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }

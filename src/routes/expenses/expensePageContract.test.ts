@@ -84,6 +84,24 @@ describe('expense report editor route', () => {
     expect(page).not.toContain('.add { margin: var(--sp-4);');
   });
 
+  test('uses the invoice row-warning pattern for out-of-range expense dates', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const invoiceSection = readFileSync('src/lib/components/InvoiceSection.svelte', 'utf8');
+    const sharedWarnsStyle = '.warns { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--sp-3); padding-top: var(--sp-1); }';
+    const sharedWarnTextStyle = '.warns span { color: var(--amber-600); font-size: var(--fs-sm); }';
+
+    expect(page).toContain('expenseRowDateRangeWarning(blockers, index)');
+    expect(page).toContain('<div class="warns"><span>⚠ {dateRangeWarning}</span></div>');
+    expect(page).toContain('const blockingRowCount = $derived(expenseBlockingRowCount(blockers));');
+    expect(page).toContain('{#if blockers[0].itemIndex !== null}');
+    expect(page).toContain("Fix {blockingRowCount} {blockingRowCount === 1 ? 'row' : 'rows'} to finish →");
+    expect(page).toContain('{blockers[0].message} Fix it →');
+    expect(invoiceSection).toContain(sharedWarnsStyle);
+    expect(invoiceSection).toContain(sharedWarnTextStyle);
+    expect(page).toContain(sharedWarnsStyle);
+    expect(page).toContain(sharedWarnTextStyle);
+  });
+
   test('sorts the visible editor rows before building Preview', () => {
     const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
     const previewStart = page.indexOf('function openPreview()');

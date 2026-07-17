@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'vitest';
-import { firstExpenseBlockerTarget, prepareExpensePreview } from './expenseEditor';
+import {
+  expenseBlockingRowCount,
+  expenseRowDateRangeWarning,
+  firstExpenseBlockerTarget,
+  prepareExpensePreview,
+} from './expenseEditor';
+import { expenseFinalizeBlockers } from '../expense/validation';
 import type { ExpenseDraft } from '../expense/types';
 import type { Settings } from '../types';
 
@@ -40,14 +46,36 @@ describe('expense editor helpers', () => {
       ],
     };
 
+    const blockers = expenseFinalizeBlockers(rangeDraft);
     expect(firstExpenseBlockerTarget(rangeDraft)).toEqual({
       id: 'expense-row-1-date',
-      message: 'Expense 2 date must be between Jul 1, 2026 and Jul 15, 2026.',
+      message: 'Date is outside the reporting period',
     });
+    expect(expenseRowDateRangeWarning(blockers, 0)).toBeNull();
+    expect(expenseRowDateRangeWarning(blockers, 1)).toBe('Date is outside the reporting period');
+    expect(expenseRowDateRangeWarning(blockers, 2)).toBeNull();
 
     const preview = prepareExpensePreview(rangeDraft, settings, 4);
     expect(preview.items.map((entry) => entry.description)).toEqual(['Parking', 'Fuel']);
     expect(rangeDraft.items.map((entry) => entry.description)).toEqual(['Parking', 'Fuel']);
+  });
+
+  test('returns a warning for every out-of-range row and ignores other date blockers', () => {
+    const rangeDraft: ExpenseDraft = {
+      seq: 4, year: 2026, reportDate: '2026-07-15',
+      periodStart: '2026-07-01', periodEnd: '2026-07-15',
+      items: [
+        { position: 0, date: '2026-06-30', description: '', amountCents: 0 },
+        { position: 1, date: '2026-07-16', description: 'Parking', amountCents: 1_250 },
+        { position: 2, date: '', description: 'Meals', amountCents: 2_000 },
+      ],
+    };
+    const blockers = expenseFinalizeBlockers(rangeDraft);
+
+    expect(expenseRowDateRangeWarning(blockers, 0)).toBe('Date is outside the reporting period');
+    expect(expenseRowDateRangeWarning(blockers, 1)).toBe('Date is outside the reporting period');
+    expect(expenseRowDateRangeWarning(blockers, 2)).toBeNull();
+    expect(expenseBlockingRowCount(blockers)).toBe(3);
   });
 
   test('points to the first header or row field that blocks finalization', () => {

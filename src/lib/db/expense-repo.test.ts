@@ -144,7 +144,7 @@ describe('expense finalization', () => {
     const persistedItemsBefore = (await loadExpenseDraft(db, id)).items;
 
     await expect(finalizeExpenseReport(db, id)).rejects.toThrow(
-      'Expense 2 date must be between Jul 1, 2026 and Jul 15, 2026.',
+      'Date is outside the reporting period',
     );
 
     expect(await db.select(

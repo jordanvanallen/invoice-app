@@ -1,11 +1,21 @@
 import type { Settings } from '../types';
-import { expenseFinalizeBlockers } from '../expense/validation';
+import {
+  EXPENSE_DATE_OUTSIDE_PERIOD_MESSAGE,
+  expenseFinalizeBlockers,
+} from '../expense/validation';
 import { buildExpenseSnapshot } from '../expense/snapshot';
-import type { ExpenseDraft, ExpenseSnapshot } from '../expense/types';
+import type { ExpenseBlocker, ExpenseDraft, ExpenseSnapshot } from '../expense/types';
 
 export interface ExpenseBlockerTarget {
   id: string;
   message: string;
+}
+
+/** Count unique expense rows with at least one finalization blocker. */
+export function expenseBlockingRowCount(blockers: readonly ExpenseBlocker[]): number {
+  return new Set(blockers.flatMap((blocker) =>
+    blocker.itemIndex === null ? [] : [blocker.itemIndex]
+  )).size;
 }
 
 /** Build the sorted Preview snapshot without changing the editor's row order. */
@@ -32,4 +42,16 @@ export function firstExpenseBlockerTarget(draft: ExpenseDraft): ExpenseBlockerTa
     items: 'expense-add-row',
   };
   return { id: ids[blocker.field] ?? 'expense-add-row', message: blocker.message };
+}
+
+/** Select the shared out-of-range warning for one displayed expense row. */
+export function expenseRowDateRangeWarning(
+  blockers: readonly ExpenseBlocker[],
+  itemIndex: number,
+): string | null {
+  return blockers.find((blocker) =>
+    blocker.field === 'date'
+      && blocker.itemIndex === itemIndex
+      && blocker.message === EXPENSE_DATE_OUTSIDE_PERIOD_MESSAGE
+  )?.message ?? null;
 }
