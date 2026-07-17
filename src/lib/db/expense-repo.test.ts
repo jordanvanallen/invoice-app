@@ -133,13 +133,15 @@ describe('expense finalization', () => {
   test('rejects an out-of-range item without any finalization side effects', async () => {
     const db = await freshDb();
     const id = await createExpenseDraft(db, header());
+    const originalItems = [
+      item({ position: 0, date: '2026-07-10', description: 'Parking' }),
+      item({ position: 1, date: '2026-06-30', description: 'Fuel' }),
+    ];
     await saveExpenseDraft(db, id, draft({
       seq: 9,
-      items: [
-        item({ position: 0, date: '2026-07-10', description: 'Parking' }),
-        item({ position: 1, date: '2026-07-16', description: 'Fuel' }),
-      ],
+      items: originalItems,
     }));
+    const persistedItemsBefore = (await loadExpenseDraft(db, id)).items;
 
     await expect(finalizeExpenseReport(db, id)).rejects.toThrow(
       'Expense 2 date must be between Jul 1, 2026 and Jul 15, 2026.',
@@ -151,9 +153,7 @@ describe('expense finalization', () => {
     )).toEqual([{
       status: 'draft', finalized_at: null, total_cents: 0, snapshot_json: null,
     }]);
-    expect((await loadExpenseDraft(db, id)).items.map((entry) => entry.description)).toEqual([
-      'Parking', 'Fuel',
-    ]);
+    expect((await loadExpenseDraft(db, id)).items).toEqual(persistedItemsBefore);
     expect(await db.select('SELECT * FROM expense_year_counters')).toEqual([]);
     await expect(reprintExpenseSnapshot(db, id)).rejects.toThrow(/not finalized/i);
   });

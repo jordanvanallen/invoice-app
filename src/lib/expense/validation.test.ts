@@ -87,6 +87,22 @@ describe('expense validation', () => {
     ]);
   });
 
+  test('defers row-range blockers until the reporting period is complete and ordered', () => {
+    const outsideRow = [row({ date: '2026-06-30' })];
+
+    expect(expenseFinalizeBlockers(draft({ periodStart: '', items: outsideRow }))).toEqual([
+      { field: 'periodStart', itemIndex: null, message: 'Choose a reporting period start date.' },
+    ]);
+    expect(expenseFinalizeBlockers(draft({ periodEnd: '', items: outsideRow }))).toEqual([
+      { field: 'periodEnd', itemIndex: null, message: 'Choose a reporting period end date.' },
+    ]);
+    expect(expenseFinalizeBlockers(draft({
+      periodStart: '2026-08-01', periodEnd: '2026-07-01', items: outsideRow,
+    }))).toEqual([
+      { field: 'periodEnd', itemIndex: null, message: 'The reporting period end must be on or after its start.' },
+    ]);
+  });
+
   test('requires at least one row', () => {
     expect(expenseFinalizeBlockers(draft({ items: [] }))).toEqual([
       { field: 'items', itemIndex: null, message: 'Add at least one expense.' },
