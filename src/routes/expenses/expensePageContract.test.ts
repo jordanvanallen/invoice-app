@@ -169,14 +169,12 @@ describe('expense report editor route', () => {
     expect(page).toContain("{#if finalizeError}<p class=\"error\">Couldn't save: {finalizeError}</p>{/if}\n  </div>\n\n  {#if showPreview");
   });
 
-  test('provides an explicit confirmed way to discard the single unfinished draft', () => {
+  test('does not expose a destructive draft-discard action', () => {
     const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
 
-    expect(page).toContain('deleteExpenseDraft');
-    expect(page).toContain('Discard draft');
-    expect(page).toContain('Discard this unfinished expense report?');
-    expect(page).toContain('confirmVariant="destructive"');
-    expect(page).toContain('await deleteExpenseDraft(await getDb(), currentReportId);');
-    expect(page).toContain("await goto('/expense-history');");
+    expect(page).not.toContain('deleteExpenseDraft');
+    expect(page).not.toContain('Discard draft');
+    expect(page).not.toContain('Discard this unfinished expense report?');
+    expect(page).not.toContain('discard-button');
   });
 });

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { goto, onNavigate } from '$app/navigation';
+  import { onNavigate } from '$app/navigation';
   import BigButton from '$lib/components/BigButton.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import DatePicker from '$lib/components/DatePicker.svelte';
@@ -10,7 +10,6 @@
   import { getDb } from '$lib/db';
   import {
     createExpenseDraft,
-    deleteExpenseDraft,
     finalizeExpenseReport,
     latestExpenseDraftId,
     loadExpenseDraft,
@@ -277,9 +276,6 @@
   let finalized = $state<ExpenseSnapshot | null>(null);
   let finalizeSaving = $state(false);
   let finalizeError = $state('');
-  let showDiscard = $state(false);
-  let discardSaving = $state(false);
-  let discardError = $state('');
 
   async function doFinalize() {
     if (finalizeSaving || reportId === null || !canFinalize) return;
@@ -304,26 +300,6 @@
     if (finalized) showSaveToast(await saveExpensePdf(finalized));
   }
 
-  async function doDiscard() {
-    const currentReportId = reportId;
-    if (discardSaving || currentReportId === null) return;
-    discardSaving = true;
-    discardError = '';
-    autosave?.cancelPending();
-    try {
-      const deleted = await deleteExpenseDraft(await getDb(), currentReportId);
-      if (!deleted) throw new Error('This expense report is no longer an editable draft.');
-      reportId = null;
-      showDiscard = false;
-      await goto('/expense-history');
-    } catch (error) {
-      discardError = (error as Error).message;
-      autosave?.notifyChanged();
-    } finally {
-      discardSaving = false;
-    }
-  }
-
   async function startNew() {
     const defaults = defaultInvoicePeriod();
     const db = await getDb();
@@ -346,8 +322,6 @@
     undoTimer = null;
     finalized = null;
     finalizeError = '';
-    showDiscard = false;
-    discardError = '';
     saveState = 'idle';
     lastSavedJson = JSON.stringify(buildDraft());
     makeAutosave();
@@ -404,7 +378,6 @@
   {/if}
 
   <div class="row-tools">
-    <button type="button" class="discard-button" onclick={() => (showDiscard = true)}>Discard draft</button>
     <button type="button" class="secondary-button" disabled={rows.length < 2} onclick={sortExpenseRows}>Sort rows by date</button>
   </div>
 
@@ -479,16 +452,6 @@
     </ConfirmDialog>
   {/if}
 
-  {#if showDiscard}
-    <ConfirmDialog title="Discard this unfinished expense report?"
-      confirmLabel={discardSaving ? 'Discarding...' : 'Discard draft'}
-      confirmVariant="destructive" confirmDisabled={discardSaving}
-      onConfirm={doDiscard} onCancel={() => (showDiscard = false)}>
-      <p><b>This permanently removes the current draft and its expense rows.</b></p>
-      <p class="muted">Finalized expense reports are not affected.</p>
-      {#if discardError}<p class="error">Couldn't discard: {discardError}</p>{/if}
-    </ConfirmDialog>
-  {/if}
 {/if}
 
 <style>
@@ -510,9 +473,7 @@
   .period { display: flex; gap: var(--sp-8); margin-bottom: var(--sp-6); flex-wrap: wrap; }
   .period .dates { display: flex; align-items: center; gap: var(--sp-2); }
   .empty-hint { margin: 0 0 var(--sp-4); padding: var(--sp-3) var(--sp-4); background: var(--accent-tint); color: var(--text-secondary); border-radius: var(--r-md); font-size: var(--fs-sm); }
-  .row-tools { display: flex; justify-content: space-between; gap: var(--sp-3); margin: 0 0 var(--sp-3); }
-  .discard-button { min-height: var(--target); padding: 0 var(--sp-4); border: 1px solid var(--red-600); border-radius: var(--r-sm); background: transparent; color: var(--red-600); font-weight: 600; cursor: pointer; }
-  .discard-button:hover { background: var(--red-600); color: #fff; }
+  .row-tools { display: flex; justify-content: flex-end; gap: var(--sp-3); margin: 0 0 var(--sp-3); }
   .secondary-button { min-height: var(--target); padding: 0 var(--sp-4); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); font-weight: 600; cursor: pointer; }
   .secondary-button:hover:not(:disabled) { background: var(--accent-tint); }
   .secondary-button:disabled { opacity: .55; cursor: default; }

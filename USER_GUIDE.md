@@ -109,7 +109,7 @@ Once locked, the invoice becomes a permanent record. You can always reprint it f
 
 Locked expense reports cannot be edited. Open **Expense History** to view or save the PDF again, duplicate one into a new editable draft, or cancel and restore a report. Cancelled expense reports are kept in a separate **Cancelled expense reports** section and do not count in yearly expense totals.
 
-The app keeps one unfinished expense report at a time so work cannot get hidden. Finish it before duplicating a saved report, or use **Discard draft** and confirm if you intentionally want to remove it.
+The app keeps one unfinished expense report at a time so work cannot get hidden. Finish it before duplicating a saved report.
 
 ---
 
