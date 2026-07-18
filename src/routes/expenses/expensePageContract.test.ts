@@ -11,10 +11,9 @@ function readSource(path: string): string {
 
 describe('expense report editor route', () => {
   test('normalizes Windows line endings before multiline source assertions', () => {
-    const windowsPage = readFileSync('src/routes/expenses/+page.svelte', 'utf8').replaceAll(
-      '\n',
-      '\r\n',
-    );
+    const windowsPage = normalizeLineEndings(
+      readFileSync('src/routes/expenses/+page.svelte', 'utf8'),
+    ).replaceAll('\n', '\r\n');
 
     expect(normalizeLineEndings(windowsPage)).toContain(
       `{#if finalizeError}<p class="error">Couldn't save: {finalizeError}</p>{/if}\n  </div>\n\n  {#if showPreview`,
