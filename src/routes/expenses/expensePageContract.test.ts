@@ -1,9 +1,28 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 
+function normalizeLineEndings(source: string): string {
+  return source.replace(/\r\n?/g, '\n');
+}
+
+function readSource(path: string): string {
+  return normalizeLineEndings(readFileSync(path, 'utf8'));
+}
+
 describe('expense report editor route', () => {
+  test('normalizes Windows line endings before multiline source assertions', () => {
+    const windowsPage = readFileSync('src/routes/expenses/+page.svelte', 'utf8').replaceAll(
+      '\n',
+      '\r\n',
+    );
+
+    expect(normalizeLineEndings(windowsPage)).toContain(
+      `{#if finalizeError}<p class="error">Couldn't save: {finalizeError}</p>{/if}\n  </div>\n\n  {#if showPreview`,
+    );
+  });
+
   test('provides autosave, explicit sort, snapshot Preview, and guarded finalization', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
 
     expect(page).toContain('New Expense Report');
     expect(page).toContain('SaveStatusChip');
@@ -22,7 +41,7 @@ describe('expense report editor route', () => {
   });
 
   test('matches the invoice editor hierarchy for shared document fields', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
     const headStart = page.indexOf('<div class="head">');
     const periodStart = page.indexOf('<div class="period">');
     const rowsStart = page.indexOf('<div class="row-tools">');
@@ -42,7 +61,7 @@ describe('expense report editor route', () => {
   });
 
   test('shows row-order guidance contextually instead of below the page title', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
 
     expect(page).toContain('const showExpenseHint = $derived(');
     expect(page).toContain('{#if showExpenseHint}');
@@ -51,8 +70,8 @@ describe('expense report editor route', () => {
   });
 
   test('keeps formatted row dates on one line with a text-scale-aware column', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
-    const datePicker = readFileSync('src/lib/components/DatePicker.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
+    const datePicker = readSource('src/lib/components/DatePicker.svelte');
 
     expect(datePicker).toContain('.field > span { white-space: nowrap; }');
     expect(page).toContain('grid-template-columns: calc(220px * var(--fs-scale))');
@@ -64,7 +83,7 @@ describe('expense report editor route', () => {
   });
 
   test('keeps shared calendar controls operable from the keyboard', () => {
-    const datePicker = readFileSync('src/lib/components/DatePicker.svelte', 'utf8');
+    const datePicker = readSource('src/lib/components/DatePicker.svelte');
 
     expect(datePicker).toContain('function guard(event: MouseEvent, action: () => void)');
     expect(datePicker).toContain('const keyboardActivation = event.detail === 0');
@@ -73,7 +92,7 @@ describe('expense report editor route', () => {
   });
 
   test('uses the same compact row-removal control as invoices', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
 
     expect(page).toContain('class="del" title="Remove this row"');
     expect(page).toContain('>✕</button>');
@@ -83,7 +102,7 @@ describe('expense report editor route', () => {
   });
 
   test('offers the same short-lived row-removal undo as invoices', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
 
     expect(page).toContain('let undo = $state<');
     expect(page).toContain('undoTimer = setTimeout(() => (undo = null), 8000);');
@@ -92,8 +111,8 @@ describe('expense report editor route', () => {
   });
 
   test('uses the same full-width add-row control as invoices', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
-    const invoiceSection = readFileSync('src/lib/components/InvoiceSection.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
+    const invoiceSection = readSource('src/lib/components/InvoiceSection.svelte');
     const sharedAddStyle = '.add { width: 100%; min-height: 48px; border: none; border-top: 1px solid var(--border); background: var(--bg-surface); color: var(--accent-strong); font-size: var(--fs-base); font-weight: 600; cursor: pointer; }';
 
     expect(page).toContain('>+ Add an expense</button>');
@@ -103,8 +122,8 @@ describe('expense report editor route', () => {
   });
 
   test('uses the invoice row-warning pattern for every expense row blocker', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
-    const invoiceSection = readFileSync('src/lib/components/InvoiceSection.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
+    const invoiceSection = readSource('src/lib/components/InvoiceSection.svelte');
     const sharedWarnsStyle = '.warns { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--sp-3); padding-top: var(--sp-1); }';
     const sharedWarnTextStyle = '.warns span { color: var(--amber-600); font-size: var(--fs-sm); }';
 
@@ -122,7 +141,7 @@ describe('expense report editor route', () => {
   });
 
   test('sorts the visible editor rows before building Preview', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
     const previewStart = page.indexOf('function openPreview()');
     const previewEnd = page.indexOf('\n  }', previewStart);
     const previewHandler = page.slice(previewStart, previewEnd);
@@ -137,7 +156,7 @@ describe('expense report editor route', () => {
   });
 
   test('authoritatively saves the visible draft before irreversible finalization', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
     const finalizeStart = page.indexOf('async function doFinalize()');
     const finalizeEnd = page.indexOf('\n  async function savePdfAgain()', finalizeStart);
     const finalizeHandler = page.slice(finalizeStart, finalizeEnd);
@@ -151,7 +170,7 @@ describe('expense report editor route', () => {
   });
 
   test('stacks rows based on available card width so large text cannot clip controls', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
 
     expect(page).toContain('.expenses { container-type: inline-size;');
     expect(page).toContain('.editor { container-type: inline-size; }');
@@ -164,13 +183,13 @@ describe('expense report editor route', () => {
   });
 
   test('keeps fixed preview and confirmation overlays outside layout containment', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
 
     expect(page).toContain("{#if finalizeError}<p class=\"error\">Couldn't save: {finalizeError}</p>{/if}\n  </div>\n\n  {#if showPreview");
   });
 
   test('does not expose a destructive draft-discard action', () => {
-    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const page = readSource('src/routes/expenses/+page.svelte');
 
     expect(page).not.toContain('deleteExpenseDraft');
     expect(page).not.toContain('Discard draft');
