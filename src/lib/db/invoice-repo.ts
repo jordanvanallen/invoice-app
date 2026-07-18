@@ -217,7 +217,7 @@ export async function listInvoicesForYear(db: Db, year: number): Promise<Invoice
     `SELECT id, year, seq, issue_date, total_cents
        FROM invoices
       WHERE status = 'finalized' AND CAST(substr(issue_date, 1, 4) AS INTEGER) = ?
-      ORDER BY seq`,
+      ORDER BY seq ASC`,
     [year],
   );
   return rows.map((r) => ({
@@ -244,7 +244,7 @@ export async function searchInvoices(db: Db, query: string): Promise<InvoiceList
          OR li.location LIKE ?
          OR li.vin8 LIKE ?
          OR li.inspection_number LIKE ?)
-      ORDER BY i.year DESC, i.seq DESC`,
+      ORDER BY i.year DESC, i.seq ASC`,
     [like, like, like, like, like, like],
   );
   return rows.map((r) => ({
@@ -367,10 +367,10 @@ export async function voidInvoice(db: Db, id: number): Promise<void> {
   await db.execute("UPDATE invoices SET status = 'void' WHERE id = ? AND status = 'finalized'", [id]);
 }
 
-/** All cancelled (void) invoices, newest first — for the History "Cancelled" section. */
+/** Cancelled invoices: newest year first, then invoice number ascending. */
 export async function listVoided(db: Db): Promise<InvoiceListItem[]> {
   const rows = await db.select<{ id: number; year: number; seq: number; issue_date: string; total_cents: number }>(
-    `SELECT id, year, seq, issue_date, total_cents FROM invoices WHERE status = 'void' ORDER BY year DESC, seq DESC`,
+    `SELECT id, year, seq, issue_date, total_cents FROM invoices WHERE status = 'void' ORDER BY year DESC, seq ASC`,
   );
   return rows.map((r) => ({ id: r.id, invoiceNumber: `${r.seq}-${r.year}`, issueDate: r.issue_date, totalCents: r.total_cents }));
 }

@@ -223,6 +223,33 @@ describe('expense history and lifecycle', () => {
     expect((await listVoidedExpenses(db)).map((report) => report.reportNumber)).toEqual(['2-2026']);
   });
 
+  test('orders active, searched, and cancelled expense history by report number ascending', async () => {
+    const db = await freshDb();
+    const third = await finalized(db, {
+      seq: 3, reportDate: '2026-07-17',
+      items: [item({ description: 'History order' })],
+    });
+    const first = await finalized(db, {
+      seq: 1, reportDate: '2026-07-01',
+      items: [item({ description: 'History order' })],
+    });
+    const second = await finalized(db, {
+      seq: 2, reportDate: '2026-07-10',
+      items: [item({ description: 'History order' })],
+    });
+
+    expect((await listExpensesForYear(db, 2026)).map((report) => report.reportNumber))
+      .toEqual(['1-2026', '2-2026', '3-2026']);
+    expect((await searchExpenses(db, 'History order')).map((report) => report.reportNumber))
+      .toEqual(['1-2026', '2-2026', '3-2026']);
+
+    await voidExpenseReport(db, first);
+    await voidExpenseReport(db, second);
+    await voidExpenseReport(db, third);
+    expect((await listVoidedExpenses(db)).map((report) => report.reportNumber))
+      .toEqual(['1-2026', '2-2026', '3-2026']);
+  });
+
   test('duplicates to a fresh editable draft and guards status transitions', async () => {
     const db = await freshDb();
     const source = await finalized(db, { seq: 4, items: [item({ description: 'Meals', amountCents: 2_500 })] });

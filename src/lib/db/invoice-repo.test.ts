@@ -334,6 +334,18 @@ describe('by-year views', () => {
     expect(list[0].invoiceNumber).toBe(snap.invoiceNumber);
     expect(list[0].totalCents).toBe(4294);
   });
+
+  test('orders active and searched invoice history by number ascending within the year', async () => {
+    const db = await freshDb();
+    await finalizedInvoice(db, '2026-06-30');
+    await finalizedInvoice(db, '2026-05-01');
+    await finalizedInvoice(db, '2026-06-01');
+
+    expect((await listInvoicesForYear(db, 2026)).map((invoice) => invoice.invoiceNumber))
+      .toEqual(['1-2026', '2-2026', '3-2026']);
+    expect((await searchInvoices(db, 'Acme Lease Corp')).map((invoice) => invoice.invoiceNumber))
+      .toEqual(['1-2026', '2-2026', '3-2026']);
+  });
 });
 
 describe('latestDraftId', () => {
@@ -456,6 +468,24 @@ describe('cancelled (void) listing + restore', () => {
     expect(await listVoided(db)).toEqual([]); // no longer cancelled
     expect((await listInvoicesForYear(db, 2026)).map((i) => i.invoiceNumber)).toEqual([snap.invoiceNumber]); // back, same number
     expect((await yearRollup(db, 2026)).count).toBe(1);
+  });
+
+  test('orders cancelled invoice history by number ascending within the year', async () => {
+    const db = await freshDb();
+    for (const issueDate of ['2026-06-30', '2026-05-01', '2026-06-01']) {
+      const id = await createDraft(db, {
+        year: 2026, issueDate, periodStart: issueDate, periodEnd: issueDate,
+      });
+      await saveDraft(db, id, {
+        year: 2026, issueDate, periodStart: issueDate, periodEnd: issueDate,
+        lines: [line()],
+      });
+      await finalizeInvoice(db, id);
+      await voidInvoice(db, id);
+    }
+
+    expect((await listVoided(db)).map((invoice) => invoice.invoiceNumber))
+      .toEqual(['1-2026', '2-2026', '3-2026']);
   });
 });
 
