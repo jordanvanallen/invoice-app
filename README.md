@@ -1,10 +1,10 @@
 # Invoice Maker
 
-A small, offline desktop app for creating vehicle‑inspection invoices (AutoVIN / OPENLANE style). It runs on Windows for the end user and is developed on Linux. Built with **Tauri 2 + SvelteKit + TypeScript**, with a local **SQLite** database and **PDF** generation.
+A small, offline desktop app for creating vehicle-inspection invoices and expense reports. It runs on Windows for the end user and is developed on Linux. Built with **Tauri 2 + SvelteKit + TypeScript**, with a local **SQLite** database and **PDF** generation.
 
 - **Product name:** Invoice Maker
 - **Bundle identifier:** `com.app.invoice`
-- **Current version:** `0.1.0`
+- **Release version:** injected from each `v*` Git tag by the release workflow
 - **Repo:** `git@github.com:jordanvanallen/invoice-app.git`
 
 > Looking for how to *use* the finished app? See **[USER_GUIDE.md](./USER_GUIDE.md)**. This README is for building and releasing it.
@@ -17,9 +17,10 @@ A small, offline desktop app for creating vehicle‑inspection invoices (AutoVIN
 - Fuzzy client/location pickers with “add new” inline.
 - Automatic fee + HST + total math (money stored as integer cents, tax as basis points).
 - Generates a clean PDF and keeps an immutable snapshot of every finalized invoice for faithful reprints.
+- Creates separately numbered expense reports with dated rows, reporting-period validation, immutable PDFs, and a separate history.
 - History with per‑year and custom date‑range tax summaries.
 - Cancel (void) / restore invoices without losing history.
-- Auto‑backup of the database on save; configurable save folder (point it at Dropbox/OneDrive for off‑machine copies).
+- Auto-backup of the database on finalization; configurable save folder (point it at Dropbox/OneDrive for off-machine copies).
 - Dark/light themes, three text sizes, and in‑app auto‑updates from GitHub Releases.
 
 ## Tech stack
@@ -39,7 +40,7 @@ A small, offline desktop app for creating vehicle‑inspection invoices (AutoVIN
 <repo root>/                       # the app lives at the root
 ├─ .github/workflows/release.yml   # CI: builds + signs the Windows installer on v* tags
 ├─ src/                            # SvelteKit frontend
-│  ├─ routes/                      # pages: / (editor), history, clients, locations, settings, setup, invoice/[id]
+│  ├─ routes/                      # invoice/expense editors, histories, detail pages, catalogs, backups, settings
 │  ├─ lib/components/              # DatePicker, FuzzyCombobox, InvoiceSection, AppShell, …
 │  ├─ lib/db/                      # repositories + DB adapter
 │  ├─ lib/pdf/                     # pdfmake document builders
@@ -121,17 +122,14 @@ The installed app checks `https://github.com/jordanvanallen/invoice-app/releases
 
 **Cutting a release:**
 
-1. Bump the version in **both** files (keep them in sync):
-   - `src-tauri/tauri.conf.json` → `version`
-   - `package.json` → `version`
-2. Commit the bump.
-3. Tag and push — the tag triggers the workflow:
+1. Merge the reviewed release commit to `main` and make sure the worktree is clean.
+2. Tag that commit with the next version and push it. The workflow injects the tag version into `package.json` and `src-tauri/tauri.conf.json` before building:
    ```bash
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag v0.1.5
+   git push origin v0.1.5
    ```
-4. `.github/workflows/release.yml` runs on `windows-latest`, builds + signs the installer with `TAURI_SIGNING_PRIVATE_KEY`, and publishes a GitHub Release containing the installer and `latest.json`.
-5. Installed apps detect it on next launch and offer the update (one click installs and relaunches).
+3. `.github/workflows/release.yml` runs on `windows-latest`, checks the app, builds and signs the installer with `TAURI_SIGNING_PRIVATE_KEY`, and publishes a GitHub Release containing the installer and `latest.json`.
+4. Verify the workflow, installer, and `latest.json`. Installed apps then detect the release and offer the update.
 
 > ⚠️ **Don’t lose or rotate away the private key without re‑issuing signed builds.** If the key is lost, already‑installed apps can no longer verify updates and would need a manual reinstall.
 

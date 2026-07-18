@@ -314,6 +314,11 @@ export async function duplicateExpenseReport(
   if (status !== 'finalized' && status !== 'void') {
     throw new Error('Only finalized or cancelled expense reports can be duplicated.');
   }
+  if (await latestExpenseDraftId(db) !== null) {
+    throw new Error(
+      'You already have an unfinished expense report. Open Expense Reports to finish or discard it before duplicating.',
+    );
+  }
   const source = await loadExpenseDraft(db, sourceId);
   const [next] = await db.select<{ id: number }>(
     'SELECT COALESCE(MAX(id), 0) + 1 AS id FROM expense_reports',
@@ -332,6 +337,17 @@ export async function duplicateExpenseReport(
     ).slice(1),
   ]);
   return newId;
+}
+
+/** Permanently discard only an editable draft, including its rows. */
+export async function deleteExpenseDraft(db: Db, id: number): Promise<boolean> {
+  if (await getExpenseStatus(db, id) !== 'draft') return false;
+  await executeStatementsAtomically(db, [
+    requireDraftStatement(id),
+    { sql: 'DELETE FROM expense_items WHERE expense_report_id = ?', params: [id] },
+    { sql: "DELETE FROM expense_reports WHERE id = ? AND status = 'draft'", params: [id] },
+  ]);
+  return true;
 }
 
 export async function getExpenseStatus(db: Db, id: number): Promise<ExpenseStatus | null> {

@@ -21,6 +21,8 @@ jobs:
           node-version: 20
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - name: Install frontend dependencies
         run: npm ci
@@ -37,6 +39,12 @@ jobs:
 
       - name: Unit tests (Vitest)
         run: npm test
+
+      - name: Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
       - name: Build, sign, and publish release
         uses: tauri-apps/tauri-action@v0

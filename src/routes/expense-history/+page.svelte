@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import BigButton from '$lib/components/BigButton.svelte';
   import { getDb } from '$lib/db';
@@ -101,12 +101,18 @@
       await loadAll();
     });
   }
+
+  async function showCancelled() {
+    cancelledOpen = true;
+    await tick();
+    document.getElementById('cancelled-expenses')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 </script>
 
 <div class="head">
   <div><h1>Expense History</h1><p>Finalized expense reports, kept separately from invoices.</p></div>
   {#if cancelled.length}
-    <button class="cancelled-button" onclick={() => (cancelledOpen = !cancelledOpen)}>
+    <button class="cancelled-button" onclick={showCancelled}>
       Cancelled expense reports ({cancelled.length})
     </button>
   {/if}
@@ -116,7 +122,8 @@
 
 {#snippet reportRow(report: ExpenseListItem, allowRestore = false)}
   <li>
-    <button class="number" onclick={() => goto(`/expense/${report.id}`)}>#{report.reportNumber}</button>
+    <button class="number" onclick={() => goto(`/expense/${report.id}`)}
+      title="View expense report #{report.reportNumber}">#{report.reportNumber}</button>
     <span class="date">{report.reportDate}</span>
     <span class="row-total tnum">{formatDollars(report.totalCents)}</span>
     <span class="row-actions">
@@ -178,7 +185,7 @@
   {/if}
 
   {#if cancelled.length}
-    <section class="year cancelled">
+    <section class="year cancelled" id="cancelled-expenses">
       <button class="year-head" onclick={() => (cancelledOpen = !cancelledOpen)} aria-expanded={cancelledOpen}>
         <span class="year-label">{cancelledOpen ? '▾' : '▸'} Cancelled expense reports</span>
         <span class="chips"><span>{cancelled.length} cancelled</span></span>
@@ -208,7 +215,7 @@
   .cancelled .year-label { color: var(--text-muted); }
   .chips { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
   .chips span { padding: 2px var(--sp-3); border-radius: var(--r-full); background: var(--bg-sunken); color: var(--text-secondary); font-size: var(--fs-sm); }
-  ul { list-style: none; margin: var(--sp-2) 0 0; padding: 0; }
+  ul { container-type: inline-size; list-style: none; margin: var(--sp-2) 0 0; padding: 0; }
   li { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: var(--sp-4); min-height: 64px; padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--border); }
   .number { border: 0; background: transparent; color: var(--accent-strong); font-weight: 700; cursor: pointer; }
   .number:hover { text-decoration: underline; }
@@ -219,7 +226,7 @@
   .row-actions button:hover:not(:disabled) { background: var(--accent-tint); }
   .row-actions button.primary { color: #fff; background: var(--accent-fill); border-color: var(--accent-fill); }
   .row-actions button:disabled { opacity: .55; cursor: default; }
-  @media (max-width: 820px) {
+  @container (max-width: 820px) {
     li { grid-template-columns: auto 1fr auto; }
     .row-actions { grid-column: 1 / -1; }
   }

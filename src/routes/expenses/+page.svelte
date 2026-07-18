@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { onNavigate } from '$app/navigation';
+  import { goto, onNavigate } from '$app/navigation';
   import BigButton from '$lib/components/BigButton.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import DatePicker from '$lib/components/DatePicker.svelte';
@@ -10,6 +10,7 @@
   import { getDb } from '$lib/db';
   import {
     createExpenseDraft,
+    deleteExpenseDraft,
     finalizeExpenseReport,
     latestExpenseDraftId,
     loadExpenseDraft,
@@ -72,6 +73,8 @@
   let periodEnd = $state('');
   let sequenceText = $state('');
   let rows = $state<ExpenseEditorRow[]>([]);
+  let undo = $state<{ row: ExpenseEditorRow; index: number } | null>(null);
+  let undoTimer: ReturnType<typeof setTimeout> | null = null;
   let takenSequences = $state<number[]>([]);
   let takenSequencesYear = $state<number | null>(null);
   let saveState = $state<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -114,8 +117,23 @@
   }
 
   function removeExpense(uid: string) {
+    const index = rows.findIndex((row) => row.uid === uid);
+    if (index === -1) return;
+    undo = { row: rows[index], index };
     rows = rows.filter((row) => row.uid !== uid)
       .map((row, position) => ({ ...row, position }));
+    if (undoTimer) clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => (undo = null), 8000);
+  }
+
+  function undoDelete() {
+    if (!undo) return;
+    const next = [...rows];
+    next.splice(undo.index, 0, undo.row);
+    rows = next.map((row, position) => ({ ...row, position }));
+    undo = null;
+    if (undoTimer) clearTimeout(undoTimer);
+    undoTimer = null;
   }
 
   function normalizeAmount(row: ExpenseEditorRow) {
@@ -190,6 +208,7 @@
   onDestroy(() => {
     unlisten?.();
     autosave?.dispose();
+    if (undoTimer) clearTimeout(undoTimer);
   });
 
   onNavigate(() => flushPendingAutosave(autosave, loaded && reportId !== null && !finalized));
@@ -258,6 +277,9 @@
   let finalized = $state<ExpenseSnapshot | null>(null);
   let finalizeSaving = $state(false);
   let finalizeError = $state('');
+  let showDiscard = $state(false);
+  let discardSaving = $state(false);
+  let discardError = $state('');
 
   async function doFinalize() {
     if (finalizeSaving || reportId === null || !canFinalize) return;
@@ -265,7 +287,9 @@
     finalizeError = '';
     try {
       await settleAutosaveBeforeManualSave(autosave, true);
-      finalized = await finalizeExpenseReport(await getDb(), reportId);
+      const db = await getDb();
+      await saveExpenseDraft(db, reportId, buildDraft());
+      finalized = await finalizeExpenseReport(db, reportId);
       showConfirm = false;
       showSaveToast(await saveExpensePdf(finalized));
       void backupNow();
@@ -278,6 +302,26 @@
 
   async function savePdfAgain() {
     if (finalized) showSaveToast(await saveExpensePdf(finalized));
+  }
+
+  async function doDiscard() {
+    const currentReportId = reportId;
+    if (discardSaving || currentReportId === null) return;
+    discardSaving = true;
+    discardError = '';
+    autosave?.cancelPending();
+    try {
+      const deleted = await deleteExpenseDraft(await getDb(), currentReportId);
+      if (!deleted) throw new Error('This expense report is no longer an editable draft.');
+      reportId = null;
+      showDiscard = false;
+      await goto('/expense-history');
+    } catch (error) {
+      discardError = (error as Error).message;
+      autosave?.notifyChanged();
+    } finally {
+      discardSaving = false;
+    }
   }
 
   async function startNew() {
@@ -297,8 +341,13 @@
     takenSequences = [];
     takenSequencesYear = null;
     rows = [blankRow(defaults.issueDate)];
+    undo = null;
+    if (undoTimer) clearTimeout(undoTimer);
+    undoTimer = null;
     finalized = null;
     finalizeError = '';
+    showDiscard = false;
+    discardError = '';
     saveState = 'idle';
     lastSavedJson = JSON.stringify(buildDraft());
     makeAutosave();
@@ -320,6 +369,7 @@
     </div>
   </section>
 {:else}
+  <div class="editor">
   <div class="head">
     <h1>New Expense Report</h1>
     <StatusPill status="draft" />
@@ -354,6 +404,7 @@
   {/if}
 
   <div class="row-tools">
+    <button type="button" class="discard-button" onclick={() => (showDiscard = true)}>Discard draft</button>
     <button type="button" class="secondary-button" disabled={rows.length < 2} onclick={sortExpenseRows}>Sort rows by date</button>
   </div>
 
@@ -383,6 +434,9 @@
         {/if}
       </div>
     {/each}
+    {#if undo}
+      <div class="undo">Row removed. <button type="button" onclick={undoDelete}>Undo</button></div>
+    {/if}
     <button id="expense-add-row" type="button" class="add" onclick={addExpense}>+ Add an expense</button>
   </section>
 
@@ -402,6 +456,7 @@
     </div>
   </div>
   {#if finalizeError}<p class="error">Couldn't save: {finalizeError}</p>{/if}
+  </div>
 
   {#if showPreview && previewSnapshot}
     <div class="preview-overlay" role="dialog" aria-label="Expense report preview" aria-modal="true">
@@ -423,11 +478,23 @@
       {#if finalizeError}<p class="error">Couldn't save: {finalizeError}</p>{/if}
     </ConfirmDialog>
   {/if}
+
+  {#if showDiscard}
+    <ConfirmDialog title="Discard this unfinished expense report?"
+      confirmLabel={discardSaving ? 'Discarding...' : 'Discard draft'}
+      confirmVariant="destructive" confirmDisabled={discardSaving}
+      onConfirm={doDiscard} onCancel={() => (showDiscard = false)}>
+      <p><b>This permanently removes the current draft and its expense rows.</b></p>
+      <p class="muted">Finalized expense reports are not affected.</p>
+      {#if discardError}<p class="error">Couldn't discard: {discardError}</p>{/if}
+    </ConfirmDialog>
+  {/if}
 {/if}
 
 <style>
   h1 { margin: 0; font-size: var(--fs-xl); }
   .muted { margin: 0; color: var(--text-secondary); }
+  .editor { container-type: inline-size; }
   .head { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); }
   .head .spacer { flex: 1; }
   .finalized-pill { display: inline-flex; align-items: center; min-height: 36px; padding: 0 var(--sp-3); border-radius: var(--r-full); font-size: var(--fs-sm); font-weight: 700; }
@@ -443,11 +510,13 @@
   .period { display: flex; gap: var(--sp-8); margin-bottom: var(--sp-6); flex-wrap: wrap; }
   .period .dates { display: flex; align-items: center; gap: var(--sp-2); }
   .empty-hint { margin: 0 0 var(--sp-4); padding: var(--sp-3) var(--sp-4); background: var(--accent-tint); color: var(--text-secondary); border-radius: var(--r-md); font-size: var(--fs-sm); }
-  .row-tools { display: flex; justify-content: flex-end; margin: 0 0 var(--sp-3); }
+  .row-tools { display: flex; justify-content: space-between; gap: var(--sp-3); margin: 0 0 var(--sp-3); }
+  .discard-button { min-height: var(--target); padding: 0 var(--sp-4); border: 1px solid var(--red-600); border-radius: var(--r-sm); background: transparent; color: var(--red-600); font-weight: 600; cursor: pointer; }
+  .discard-button:hover { background: var(--red-600); color: #fff; }
   .secondary-button { min-height: var(--target); padding: 0 var(--sp-4); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); font-weight: 600; cursor: pointer; }
   .secondary-button:hover:not(:disabled) { background: var(--accent-tint); }
   .secondary-button:disabled { opacity: .55; cursor: default; }
-  .expenses { overflow: hidden; margin-bottom: 96px; }
+  .expenses { container-type: inline-size; overflow: hidden; margin-bottom: 96px; }
   .row { display: grid; grid-template-columns: calc(220px * var(--fs-scale)) minmax(220px, 1fr) 170px 44px; gap: var(--sp-3); align-items: end; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
   .row-head { color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 700; align-items: center; padding-top: var(--sp-2); padding-bottom: var(--sp-2); }
   .mobile-label { display: none; }
@@ -458,6 +527,8 @@
   .del:hover { color: var(--red-600); border-color: var(--red-600); }
   .add { width: 100%; min-height: 48px; border: none; border-top: 1px solid var(--border); background: var(--bg-surface); color: var(--accent-strong); font-size: var(--fs-base); font-weight: 600; cursor: pointer; }
   .add:hover { background: var(--accent-tint); }
+  .undo { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); background: var(--bg-sunken); color: var(--text-secondary); border-top: 1px solid var(--border); }
+  .undo button { min-height: 36px; padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--accent-strong); font-weight: 600; cursor: pointer; }
   .warns { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--sp-3); padding-top: var(--sp-1); }
   .warns span { color: var(--amber-600); font-size: var(--fs-sm); }
   .dock { position: sticky; bottom: 0; margin: 0 calc(-1 * var(--sp-8)) calc(-1 * var(--sp-8)); display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); flex-wrap: wrap; padding: var(--sp-3) var(--sp-8); background: var(--bg-surface); border-top: 1px solid var(--border); box-shadow: 0 -4px 16px rgba(0,0,0,.08); }
@@ -474,7 +545,7 @@
   @media (max-width: 1000px) {
     .row { grid-template-columns: calc(200px * var(--fs-scale)) minmax(160px, 1fr) 150px 44px; }
   }
-  @media (max-width: 760px) {
+  @container (max-width: 820px) {
     .head { flex-wrap: wrap; }
     .row-head { display: none; }
     .row { grid-template-columns: 1fr; align-items: stretch; padding: var(--sp-4); }

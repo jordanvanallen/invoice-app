@@ -57,10 +57,19 @@ describe('expense report editor route', () => {
     expect(datePicker).toContain('.field > span { white-space: nowrap; }');
     expect(page).toContain('grid-template-columns: calc(220px * var(--fs-scale))');
     expect(page).toContain('grid-template-columns: calc(200px * var(--fs-scale))');
-    expect(page).toContain('@media (max-width: 760px)');
+    expect(page).toContain('@container (max-width: 820px)');
     expect(page).toContain('.row { grid-template-columns: 1fr;');
-    const mobileStyles = page.slice(page.indexOf('@media (max-width: 760px)'));
-    expect(mobileStyles).toContain('.head { flex-wrap: wrap; }');
+    const compactStyles = page.slice(page.indexOf('@container (max-width: 820px)'));
+    expect(compactStyles).toContain('.head { flex-wrap: wrap; }');
+  });
+
+  test('keeps shared calendar controls operable from the keyboard', () => {
+    const datePicker = readFileSync('src/lib/components/DatePicker.svelte', 'utf8');
+
+    expect(datePicker).toContain('function guard(event: MouseEvent, action: () => void)');
+    expect(datePicker).toContain('const keyboardActivation = event.detail === 0');
+    expect(datePicker).toContain('onclick={(event) => guard(event, toggle)}');
+    expect(datePicker).toContain('onclick={(event) => guard(event, () => pick(day))}');
   });
 
   test('uses the same compact row-removal control as invoices', () => {
@@ -71,6 +80,15 @@ describe('expense report editor route', () => {
     expect(page).not.toContain('>Remove</button>');
     expect(page).toContain('170px 44px;');
     expect(page).toContain('150px 44px;');
+  });
+
+  test('offers the same short-lived row-removal undo as invoices', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+
+    expect(page).toContain('let undo = $state<');
+    expect(page).toContain('undoTimer = setTimeout(() => (undo = null), 8000);');
+    expect(page).toContain('function undoDelete()');
+    expect(page).toContain('Row removed. <button type="button" onclick={undoDelete}>Undo</button>');
   });
 
   test('uses the same full-width add-row control as invoices', () => {
@@ -116,5 +134,49 @@ describe('expense report editor route', () => {
     expect(previewHandler.indexOf('sortExpenseRows();')).toBeLessThan(
       previewHandler.indexOf('prepareExpensePreview('),
     );
+  });
+
+  test('authoritatively saves the visible draft before irreversible finalization', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+    const finalizeStart = page.indexOf('async function doFinalize()');
+    const finalizeEnd = page.indexOf('\n  async function savePdfAgain()', finalizeStart);
+    const finalizeHandler = page.slice(finalizeStart, finalizeEnd);
+
+    expect(finalizeStart).toBeGreaterThan(-1);
+    expect(finalizeHandler).toContain('const db = await getDb();');
+    expect(finalizeHandler).toContain('await saveExpenseDraft(db, reportId, buildDraft());');
+    expect(finalizeHandler.indexOf('saveExpenseDraft(')).toBeLessThan(
+      finalizeHandler.indexOf('finalizeExpenseReport('),
+    );
+  });
+
+  test('stacks rows based on available card width so large text cannot clip controls', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+
+    expect(page).toContain('.expenses { container-type: inline-size;');
+    expect(page).toContain('.editor { container-type: inline-size; }');
+    expect(page).toContain('@container (max-width: 820px)');
+    const narrowStyles = page.slice(page.indexOf('@container (max-width: 820px)'));
+    expect(narrowStyles).toContain('.head { flex-wrap: wrap; }');
+    expect(narrowStyles).toContain('.row-head { display: none; }');
+    expect(narrowStyles).toContain('.row { grid-template-columns: 1fr;');
+    expect(narrowStyles).toContain('.mobile-label { display: inline; }');
+  });
+
+  test('keeps fixed preview and confirmation overlays outside layout containment', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+
+    expect(page).toContain("{#if finalizeError}<p class=\"error\">Couldn't save: {finalizeError}</p>{/if}\n  </div>\n\n  {#if showPreview");
+  });
+
+  test('provides an explicit confirmed way to discard the single unfinished draft', () => {
+    const page = readFileSync('src/routes/expenses/+page.svelte', 'utf8');
+
+    expect(page).toContain('deleteExpenseDraft');
+    expect(page).toContain('Discard draft');
+    expect(page).toContain('Discard this unfinished expense report?');
+    expect(page).toContain('confirmVariant="destructive"');
+    expect(page).toContain('await deleteExpenseDraft(await getDb(), currentReportId);');
+    expect(page).toContain("await goto('/expense-history');");
   });
 });

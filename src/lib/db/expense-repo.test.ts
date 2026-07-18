@@ -4,6 +4,7 @@ import { runMigrations } from './migrate';
 import { allocateSeq } from './numbering-repo';
 import {
   createExpenseDraft,
+  deleteExpenseDraft,
   deleteVoidedExpenseReport,
   duplicateExpenseReport,
   expenseYearRollup,
@@ -238,6 +239,41 @@ describe('expense history and lifecycle', () => {
     await expect(voidExpenseReport(db, source)).rejects.toThrow(/void/i);
     await restoreExpenseReport(db, source);
     expect(await getExpenseStatus(db, source)).toBe('finalized');
+  });
+
+  test('refuses to strand an existing unfinished draft during duplication', async () => {
+    const db = await freshDb();
+    const source = await finalized(db, { seq: 4 });
+    const existingDraft = await createExpenseDraft(db, header({ reportDate: '2026-07-20' }));
+    await saveExpenseDraft(db, existingDraft, draft({
+      seq: 5,
+      reportDate: '2026-07-20',
+      items: [item({ description: 'Unfinished mileage log' })],
+    }));
+
+    await expect(duplicateExpenseReport(db, source, header({ reportDate: '2026-08-01' })))
+      .rejects.toThrow(/unfinished expense report/i);
+    expect(await latestExpenseDraftId(db)).toBe(existingDraft);
+    expect((await loadExpenseDraft(db, existingDraft)).items[0].description)
+      .toBe('Unfinished mileage log');
+  });
+
+  test('discards only an unfinished draft', async () => {
+    const db = await freshDb();
+    const finalizedId = await finalized(db, { seq: 4 });
+    const draftId = await createExpenseDraft(db, header({ reportDate: '2026-07-20' }));
+    await saveExpenseDraft(db, draftId, draft({
+      seq: 5,
+      reportDate: '2026-07-20',
+      items: [item({ description: 'Discard me' })],
+    }));
+
+    await expect(deleteExpenseDraft(db, finalizedId)).resolves.toBe(false);
+    await expect(deleteExpenseDraft(db, draftId)).resolves.toBe(true);
+    expect(await getExpenseStatus(db, finalizedId)).toBe('finalized');
+    expect(await getExpenseStatus(db, draftId)).toBeNull();
+    expect(await db.select('SELECT * FROM expense_items WHERE expense_report_id = ?', [draftId]))
+      .toEqual([]);
   });
 
   test('permanently deletes only a cancelled report and never rewinds numbering', async () => {

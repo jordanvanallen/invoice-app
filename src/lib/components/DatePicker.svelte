@@ -88,7 +88,14 @@
   // calendar. Only honour clicks that began with a real pointerdown on the target.
   let armed = false;
   function arm() { armed = true; }
-  function guard(action: () => void) {
+  function guard(event: MouseEvent, action: () => void) {
+    const keyboardActivation = event.detail === 0
+      && event.clientX === 0
+      && event.clientY === 0;
+    if (keyboardActivation) {
+      action();
+      return;
+    }
     if (!armed) return;
     armed = false;
     action();
@@ -112,7 +119,7 @@
 />
 
 <div class="dp" class:block bind:this={root}>
-  <button type="button" class="field" onpointerdown={arm} onclick={() => guard(toggle)}
+  <button type="button" class="field" onpointerdown={arm} onclick={(event) => guard(event, toggle)}
     bind:this={fieldEl} aria-label={ariaLabel} aria-haspopup="dialog" aria-expanded={open}>
     <span class:placeholder={!selected}>{label(value)}</span>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -135,7 +142,7 @@
             <span></span>
           {:else}
             <button type="button" class="day" class:sel={isSel(day)}
-              onpointerdown={arm} onclick={() => guard(() => pick(day))}>{day}</button>
+              onpointerdown={arm} onclick={(event) => guard(event, () => pick(day))}>{day}</button>
           {/if}
         {/each}
       </div>
