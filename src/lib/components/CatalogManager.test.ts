@@ -65,6 +65,21 @@ describe('CatalogManager actions', () => {
     });
   });
 
+  test('successful approver deletion preserves its warning when refresh fails', async () => {
+    await expect(runCatalogDelete({
+      table: 'approvers',
+      noun: 'approver',
+      entries: [jordan],
+      entry: jordan,
+      remove: async () => true,
+      setActive: async () => { throw new Error('setActive must not run'); },
+      refresh: async () => { throw new Error('reload failed'); },
+    })).resolves.toEqual({
+      entries: [],
+      note: 'Deleted approver "Jordan Lee". Draft mileage approvals that used this approver must be re-selected. Couldn\'t refresh the approver list: reload failed',
+    });
+  });
+
   test('generic catalog deletion does not show the mileage re-selection warning', async () => {
     const client = { id: 9, name: 'Globex Finance', active: true };
 
@@ -117,6 +132,26 @@ describe('CatalogManager actions', () => {
     expect(result).toEqual({
       entries: [jordan],
       note: "Couldn't delete this approver: database unavailable",
+    });
+  });
+
+  test('failed fallback deactivation reports the deactivation stage and refreshes state', async () => {
+    let refreshCount = 0;
+
+    const result = await runCatalogDelete({
+      table: 'approvers',
+      noun: 'approver',
+      entries: [jordan],
+      entry: jordan,
+      remove: async () => false,
+      setActive: async () => { throw new Error('database unavailable'); },
+      refresh: async () => { refreshCount += 1; return [jordan]; },
+    });
+
+    expect(refreshCount).toBe(1);
+    expect(result).toEqual({
+      entries: [jordan],
+      note: "Couldn't deactivate this approver: database unavailable",
     });
   });
 });

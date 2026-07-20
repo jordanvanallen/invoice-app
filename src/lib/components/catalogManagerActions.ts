@@ -34,16 +34,27 @@ function failureMessage(action: string, noun: string, error: unknown): string {
   return `Couldn't ${action} this ${noun}${detail ? `: ${detail}` : '.'}`;
 }
 
+function refreshFailureMessage(noun: string, error: unknown): string {
+  const detail = error instanceof Error ? error.message.trim() : '';
+  return `Couldn't refresh the ${noun} list${detail ? `: ${detail}` : '.'}`;
+}
+
+function appendStatus(note: string, next: string): string {
+  if (!note) return next;
+  return `${note}${/[.!?]$/.test(note) ? '' : '.'} ${next}`;
+}
+
 async function withRefreshedEntries(
   options: CommonOptions,
   note: string,
+  fallbackEntries: CatalogEntry[] = options.entries,
 ): Promise<CatalogActionResult> {
   try {
     return { entries: await options.refresh(), note };
   } catch (error) {
     return {
-      entries: options.entries,
-      note: failureMessage('refresh', `${options.noun} list`, error),
+      entries: fallbackEntries,
+      note: appendStatus(note, refreshFailureMessage(options.noun, error)),
     };
   }
 }
@@ -75,20 +86,32 @@ export async function runCatalogToggle(options: ToggleOptions): Promise<CatalogA
 }
 
 export async function runCatalogDelete(options: DeleteOptions): Promise<CatalogActionResult> {
-  let note: string;
+  let deleted: boolean;
   try {
-    const deleted = await options.remove(options.entry.id);
-    if (!deleted) {
-      await options.setActive(options.entry.id, false);
-      note = `This ${options.noun} is used on past invoices, so "${options.entry.name}" can't be deleted — it was deactivated and is now hidden from new rows.`;
-    } else if (options.table === 'approvers') {
-      note = `Deleted ${options.noun} "${options.entry.name}". Draft mileage approvals that used this approver must be re-selected.`;
-    } else {
-      note = `Deleted ${options.noun} "${options.entry.name}".`;
-    }
+    deleted = await options.remove(options.entry.id);
   } catch (error) {
     return withRefreshedEntries(options, failureMessage('delete', options.noun, error));
   }
 
-  return withRefreshedEntries(options, note);
+  if (!deleted) {
+    try {
+      await options.setActive(options.entry.id, false);
+    } catch (error) {
+      return withRefreshedEntries(options, failureMessage('deactivate', options.noun, error));
+    }
+
+    return withRefreshedEntries(
+      options,
+      `This ${options.noun} is used on past invoices, so "${options.entry.name}" can't be deleted — it was deactivated and is now hidden from new rows.`,
+    );
+  }
+
+  const note = options.table === 'approvers'
+    ? `Deleted ${options.noun} "${options.entry.name}". Draft mileage approvals that used this approver must be re-selected.`
+    : `Deleted ${options.noun} "${options.entry.name}".`;
+  return withRefreshedEntries(
+    options,
+    note,
+    options.entries.filter((entry) => entry.id !== options.entry.id),
+  );
 }
