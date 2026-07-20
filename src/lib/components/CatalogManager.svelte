@@ -43,6 +43,7 @@
     try {
       await renameEntry(await getDb(), table, id, name.trim());
       note = '';
+      await refresh();
     } catch (e) {
       note = (e as Error).message;
       await refresh();

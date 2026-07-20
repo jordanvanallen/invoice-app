@@ -31,6 +31,17 @@ describe('approver catalog UI contract', () => {
     expect(manager).toContain('This ${noun} is used on past invoices');
   });
 
+  test('catalog manager refreshes displayed state after a successful rename', () => {
+    const manager = readSource('src/lib/components/CatalogManager.svelte');
+    const renameHandler = manager.match(
+      /async function rename\([\s\S]*?\n  }\n  async function toggle/,
+    )?.[0] ?? '';
+
+    expect(renameHandler).toMatch(
+      /await renameEntry\([\s\S]*?\);\n\s+note = '';\n\s+await refresh\(\);/,
+    );
+  });
+
   test('every catalog page supplies the required singular noun', () => {
     expect(readSource('src/routes/clients/+page.svelte')).toContain('noun="client"');
     expect(readSource('src/routes/locations/+page.svelte')).toContain('noun="location"');
@@ -49,12 +60,11 @@ describe('approver catalog UI contract', () => {
 
   test('app navigation places Approvers immediately after Locations', () => {
     const shell = readSource('src/lib/components/AppShell.svelte');
-    const locations = shell.indexOf("{ href: '/locations', label: 'Locations' }");
-    const approvers = shell.indexOf("{ href: '/approvers', label: 'Approvers' }");
-    const backups = shell.indexOf("{ href: '/backups', label: 'Backups' }");
+    const navItems = [...shell.matchAll(/\{ href: '([^']+)', label: '([^']+)' \}/g)]
+      .map((match) => ({ href: match[1], label: match[2] }));
+    const locations = navItems.findIndex((item) => item.href === '/locations');
 
     expect(locations).toBeGreaterThan(-1);
-    expect(approvers).toBeGreaterThan(locations);
-    expect(approvers).toBeLessThan(backups);
+    expect(navItems[locations + 1]).toEqual({ href: '/approvers', label: 'Approvers' });
   });
 });
