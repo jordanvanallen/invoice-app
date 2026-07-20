@@ -15,6 +15,22 @@ describe('approver catalog UI contract', () => {
     expect(store).toContain("addEntry(await getDb(), 'approvers', name)");
   });
 
+  test('invoice quick-add refreshes to the canonical approver and preserves partial success', () => {
+    const route = readSource('src/routes/+page.svelte');
+    const handler = route.slice(
+      route.indexOf('async function addApprover('),
+      route.indexOf('</script>'),
+    );
+
+    expect(route).toContain("import { addAndRefreshComboboxEntry, type ComboboxAddNewResult } from '$lib/ui/combobox';");
+    expect(handler).toContain('async function addApprover(name: string): Promise<ComboboxAddNewResult>');
+    expect(handler).toContain('const outcome = await addAndRefreshComboboxEntry({');
+    expect(handler).toContain('add: addApproverDb,');
+    expect(handler).toContain('refresh: loadApprovers,');
+    expect(handler).toContain('if (outcome.entries) approvers = outcome.entries;');
+    expect(handler).toContain('return outcome.result;');
+  });
+
   test('catalog manager requires its noun and labels inputs and live status accessibly', () => {
     const manager = readSource('src/lib/components/CatalogManager.svelte');
 

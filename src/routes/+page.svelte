@@ -25,6 +25,7 @@
   import { invoiceFinalizeBlockers, findDuplicates, type InvoiceFinalizeField } from '$lib/validation';
   import { formatDollars } from '$lib/money';
   import { bpToPercentInput } from '$lib/ui/format';
+  import { addAndRefreshComboboxEntry, type ComboboxAddNewResult } from '$lib/ui/combobox';
   import {
     canPersistInvoiceSequence,
     draftSeqForPersistence,
@@ -347,10 +348,15 @@
     locations = await loadLocations();
     return id;
   }
-  async function addApprover(name: string): Promise<number> {
-    const id = await addApproverDb(name);
-    approvers = await loadApprovers();
-    return id;
+  async function addApprover(name: string): Promise<ComboboxAddNewResult> {
+    const outcome = await addAndRefreshComboboxEntry({
+      noun: 'approver',
+      label: name,
+      add: addApproverDb,
+      refresh: loadApprovers,
+    });
+    if (outcome.entries) approvers = outcome.entries;
+    return outcome.result;
   }
 </script>
 

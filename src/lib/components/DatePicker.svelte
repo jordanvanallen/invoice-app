@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import {
+    calendarDialogTabStopIndices,
     calendarDateLabel,
     initialCalendarDate,
     moveCalendarDateByKey,
@@ -154,7 +155,15 @@
 
   function onDialogKeydown(event: KeyboardEvent) {
     if (event.key !== 'Tab' || !dialogEl) return;
-    const focusable = dialogEl.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, [tabindex]:not([tabindex="-1"])');
+    const candidates = Array.from(
+      dialogEl.querySelectorAll<HTMLElement>('button, [href], input, [tabindex]'),
+    );
+    const focusable = calendarDialogTabStopIndices(candidates.map((element) => ({
+      tabIndex: element.tabIndex,
+      disabled: element.hasAttribute('disabled'),
+      hidden: element.hidden,
+      visible: element.getClientRects().length > 0,
+    }))).map((index) => candidates[index]);
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
@@ -177,6 +186,14 @@
   function onDocPointer(e: MouseEvent) {
     if (open && root && !root.contains(e.target as Node)) open = false;
   }
+  function onViewportDismiss() {
+    if (!open) return;
+    if (dialogEl?.contains(document.activeElement)) {
+      void closeAndRestoreFocus();
+      return;
+    }
+    open = false;
+  }
   function dateForDay(day: number): Date {
     return new Date(view.getFullYear(), view.getMonth(), day);
   }
@@ -193,8 +210,8 @@
 <svelte:window
   onmousedown={onDocPointer}
   onkeydown={onWindowKeydown}
-  onresize={() => (open = false)}
-  onscroll={() => (open = false)}
+  onresize={onViewportDismiss}
+  onscroll={onViewportDismiss}
 />
 
 <div class="dp" class:block bind:this={root}>

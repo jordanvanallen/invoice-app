@@ -4,6 +4,7 @@
   import { formatDollars } from '$lib/money';
   import { mileageApprovalText, hasCompleteMileageApproval } from '$lib/mileageApproval';
   import { canonicalInvoiceMoneyInput, invoiceMoneyInputTransition } from '$lib/ui/format';
+  import type { ComboboxAddNewResult } from '$lib/ui/combobox';
   import { formatIsoDate, normalizeVin8, isValidVin8, isValidIsoDate, isDateOutsidePeriod } from '$lib/validation';
   import type { CatalogEntry } from '$lib/db/catalog-repo';
   import { newRow, type EditorRow } from '$lib/ui/editorRow';
@@ -38,7 +39,7 @@
     approvers: CatalogEntry[];
     addClient: (name: string) => Promise<number>;
     addLocation: (name: string) => Promise<number>;
-    addApprover: (name: string) => Promise<number>;
+    addApprover: (name: string) => Promise<ComboboxAddNewResult>;
     defaultFeeCents: number;
     dateDefault: string;
     periodStart: string;

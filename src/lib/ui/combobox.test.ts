@@ -1,5 +1,6 @@
 import { test, expect, describe } from 'vitest';
 import {
+  addAndRefreshComboboxEntry,
   applyComboboxInputEdit,
   comboboxBlurState,
   comboboxKeyAction,
@@ -181,7 +182,40 @@ describe('runComboboxAddAction', () => {
     })).resolves.toEqual({
       status: 'added',
       id: 7,
+      name: 'Jordan Lee',
       message: 'Added approver "Jordan Lee".',
+    });
+  });
+
+  test('successful add commits the canonical returned name', async () => {
+    await expect(runComboboxAddAction({
+      pending: false,
+      noun: 'approver',
+      label: 'jordan lee',
+      add: async () => ({ id: 7, name: 'Jordan Lee' }),
+    })).resolves.toEqual({
+      status: 'added',
+      id: 7,
+      name: 'Jordan Lee',
+      message: 'Added approver "Jordan Lee".',
+    });
+  });
+
+  test('successful add exposes a caller-provided partial-success status', async () => {
+    await expect(runComboboxAddAction({
+      pending: false,
+      noun: 'approver',
+      label: 'jordan lee',
+      add: async () => ({
+        id: 7,
+        name: 'jordan lee',
+        status: 'Added approver "jordan lee", but the list could not refresh.',
+      }),
+    })).resolves.toEqual({
+      status: 'added',
+      id: 7,
+      name: 'jordan lee',
+      message: 'Added approver "jordan lee", but the list could not refresh.',
     });
   });
 
@@ -194,6 +228,40 @@ describe('runComboboxAddAction', () => {
     })).resolves.toEqual({
       status: 'failed',
       message: "Couldn't add this approver: database unavailable",
+    });
+  });
+});
+
+describe('addAndRefreshComboboxEntry', () => {
+  test('returns the refreshed canonical entry after case-insensitive inactive reactivation', async () => {
+    const refreshed = [{ id: 7, name: 'Jordan Lee', active: true }];
+    await expect(addAndRefreshComboboxEntry({
+      noun: 'approver',
+      label: 'jOrDaN lEe',
+      add: async (label) => {
+        expect(label).toBe('jOrDaN lEe');
+        return 7;
+      },
+      refresh: async () => refreshed,
+    })).resolves.toEqual({
+      entries: refreshed,
+      result: { id: 7, name: 'Jordan Lee' },
+    });
+  });
+
+  test('returns linked partial success with typed name when refresh fails', async () => {
+    await expect(addAndRefreshComboboxEntry({
+      noun: 'approver',
+      label: 'jOrDaN lEe',
+      add: async () => 7,
+      refresh: async () => { throw new Error('database unavailable'); },
+    })).resolves.toEqual({
+      entries: null,
+      result: {
+        id: 7,
+        name: 'jOrDaN lEe',
+        status: 'Added approver "jOrDaN lEe", but couldn\'t refresh the approver list: database unavailable',
+      },
     });
   });
 });

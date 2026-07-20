@@ -45,6 +45,22 @@ export function moveCalendarMonth(date: Date, delta: number): Date {
   return new Date(target.getFullYear(), target.getMonth(), Math.min(date.getDate(), lastDay));
 }
 
+export interface CalendarDialogTabStopState {
+  tabIndex: number;
+  disabled: boolean;
+  hidden: boolean;
+  visible: boolean;
+}
+
+/** Identify the candidates that participate in the browser's current tab order. */
+export function calendarDialogTabStopIndices(
+  states: readonly CalendarDialogTabStopState[],
+): number[] {
+  return states.flatMap((state, index) => (
+    state.tabIndex >= 0 && !state.disabled && !state.hidden && state.visible ? [index] : []
+  ));
+}
+
 /** Header defaults for a brand-new or duplicated invoice: today, with a 7-day
  *  billing period ending today. */
 export function defaultInvoicePeriod(): { year: number; issueDate: string; periodStart: string; periodEnd: string } {

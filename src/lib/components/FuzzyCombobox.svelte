@@ -8,6 +8,7 @@
     comboboxPopupState,
     runComboboxAddAction,
     type ComboOption,
+    type ComboboxAddNewResult,
   } from '$lib/ui/combobox';
 
   let {
@@ -29,7 +30,7 @@
     selectedId?: number | null;
     text?: string;
     noun?: string;
-    onAddNew: (name: string) => Promise<number>;
+    onAddNew: (name: string) => Promise<ComboboxAddNewResult>;
     warning?: string;
     inputId?: string;
     required?: boolean;
@@ -99,7 +100,7 @@
         return;
       }
       selectedId = result.id;
-      text = opt.label;
+      text = result.name;
       status = result.message;
     }
     open = false;

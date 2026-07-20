@@ -106,12 +106,21 @@ interface ComboboxAddActionInput {
   pending: boolean;
   noun: string;
   label: string;
-  add: (label: string) => Promise<number>;
+  add: (label: string) => Promise<ComboboxAddNewResult>;
 }
+
+export interface ComboboxAddedEntry {
+  id: number;
+  name: string;
+  status?: string;
+}
+
+/** Number remains supported for existing callers that have no canonical name to return. */
+export type ComboboxAddNewResult = number | ComboboxAddedEntry;
 
 export type ComboboxAddActionResult =
   | { status: 'ignored' }
-  | { status: 'added'; id: number; message: string }
+  | { status: 'added'; id: number; name: string; message: string }
   | { status: 'failed'; message: string };
 
 export async function runComboboxAddAction(
@@ -119,13 +128,60 @@ export async function runComboboxAddAction(
 ): Promise<ComboboxAddActionResult> {
   if (input.pending) return { status: 'ignored' };
   try {
-    const id = await input.add(input.label);
-    return { status: 'added', id, message: `Added ${input.noun} "${input.label}".` };
+    const added = await input.add(input.label);
+    const entry = typeof added === 'number'
+      ? { id: added, name: input.label }
+      : added;
+    return {
+      status: 'added',
+      id: entry.id,
+      name: entry.name,
+      message: entry.status || `Added ${input.noun} "${entry.name}".`,
+    };
   } catch (error) {
     const detail = error instanceof Error ? error.message.trim() : '';
     return {
       status: 'failed',
       message: `Couldn't add this ${input.noun}${detail ? `: ${detail}` : '.'}`,
+    };
+  }
+}
+
+export interface AddAndRefreshComboboxEntryInput<T extends { id: number; name: string }> {
+  noun: string;
+  label: string;
+  add: (label: string) => Promise<number>;
+  refresh: () => Promise<T[]>;
+}
+
+export interface AddAndRefreshComboboxEntryResult<T extends { id: number; name: string }> {
+  entries: T[] | null;
+  result: ComboboxAddedEntry;
+}
+
+/** Persist first, then resolve the canonical catalog name without losing partial success. */
+export async function addAndRefreshComboboxEntry<T extends { id: number; name: string }>(
+  input: AddAndRefreshComboboxEntryInput<T>,
+): Promise<AddAndRefreshComboboxEntryResult<T>> {
+  const id = await input.add(input.label);
+  try {
+    const entries = await input.refresh();
+    const canonical = entries.find((entry) => entry.id === id);
+    return {
+      entries,
+      result: canonical
+        ? { id: canonical.id, name: canonical.name }
+        : { id, name: input.label },
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.trim() : '';
+    return {
+      entries: null,
+      result: {
+        id,
+        name: input.label,
+        status: `Added ${input.noun} "${input.label}", but couldn't refresh the ${input.noun} list${detail ? `: ${detail}` : '.'}`,
+      },
     };
   }
 }

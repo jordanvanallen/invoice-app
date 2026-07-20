@@ -1,5 +1,6 @@
 import { test, expect, describe } from 'vitest';
 import {
+  calendarDialogTabStopIndices,
   calendarDateLabel,
   defaultInvoicePeriod,
   initialCalendarDate,
@@ -26,6 +27,25 @@ describe('defaultInvoicePeriod', () => {
 });
 
 describe('calendar navigation', () => {
+  test('dialog tab stops include only the mid-month roving day and true controls', () => {
+    const days = Array.from({ length: 31 }, (_, index) => ({
+      tabIndex: index === 14 ? 0 : -1,
+      disabled: false,
+      hidden: false,
+      visible: true,
+    }));
+    const states = [
+      { tabIndex: 0, disabled: false, hidden: false, visible: true },
+      { tabIndex: 0, disabled: true, hidden: false, visible: true },
+      { tabIndex: 0, disabled: false, hidden: true, visible: true },
+      { tabIndex: 0, disabled: false, hidden: false, visible: false },
+      ...days,
+      { tabIndex: 0, disabled: false, hidden: false, visible: true },
+    ];
+
+    expect(calendarDialogTabStopIndices(states)).toEqual([0, 18, 35]);
+  });
+
   test('initial focus prefers a valid selected date and otherwise uses today', () => {
     const today = new Date(2026, 6, 20);
     expect(toIsoDate(initialCalendarDate('2026-07-09', today))).toBe('2026-07-09');

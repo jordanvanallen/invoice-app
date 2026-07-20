@@ -73,6 +73,7 @@ describe('invoice approval component contracts', () => {
     expect(commit).toContain('pending = true;');
     expect(commit).toContain('await runComboboxAddAction({');
     expect(commit).toContain("if (result.status === 'failed')");
+    expect(commit).toContain('text = result.name;');
     expect(commit).toContain('open = true;');
     expect(commit).toContain('await tick();');
     expect(commit).toContain('inputEl?.focus();');
@@ -104,7 +105,11 @@ describe('invoice approval component contracts', () => {
       'async function closeAndRestoreFocus()',
       'fieldEl?.focus();',
       'function onDialogKeydown(event: KeyboardEvent)',
-      "dialogEl.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, [tabindex]:not([tabindex=\"-1\"])')",
+      "dialogEl.querySelectorAll<HTMLElement>('button, [href], input, [tabindex]')",
+      'calendarDialogTabStopIndices(candidates.map((element) => ({',
+      'tabIndex: element.tabIndex,',
+      "disabled: element.hasAttribute('disabled'),",
+      'visible: element.getClientRects().length > 0,',
       'role="dialog" aria-modal="true"',
       'bind:this={dialogEl} onkeydown={onDialogKeydown}',
       'role="grid"',
@@ -122,6 +127,12 @@ describe('invoice approval component contracts', () => {
     expect(pick).toContain('fieldEl?.focus();');
     expect(source).toContain("if (event.key === 'Escape' && open)");
     expect(source).toContain('void closeAndRestoreFocus();');
+    expect(source).toContain('function onViewportDismiss()');
+    expect(source).toContain('if (dialogEl?.contains(document.activeElement))');
+    expect(source).toContain('onresize={onViewportDismiss}');
+    expect(source).toContain('onscroll={onViewportDismiss}');
+    expect(source).not.toContain('onresize={() => (open = false)}');
+    expect(source).not.toContain('onscroll={() => (open = false)}');
     expect(source).toContain('.days { display: flex; flex-direction: column; gap: 2px; }');
     expect(source).toContain('.week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }');
     expect(source).not.toContain('.week { display: contents; }');
@@ -130,7 +141,7 @@ describe('invoice approval component contracts', () => {
   test('invoice sections render responsive row-local mileage approval disclosures', () => {
     const section = readSource('src/lib/components/InvoiceSection.svelte');
     expect(section).toContain('approvers: CatalogEntry[]');
-    expect(section).toContain('addApprover: (name: string) => Promise<number>');
+    expect(section).toContain('addApprover: (name: string) => Promise<ComboboxAddNewResult>');
     expect(section).toContain('id="mileage-approval-{row.uid}"');
     expect(section).toContain('aria-expanded={!row.approvalCollapsed}');
     expect(section).toContain('aria-controls="mileage-approval-{row.uid}"');
