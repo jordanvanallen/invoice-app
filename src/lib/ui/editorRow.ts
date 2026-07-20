@@ -1,4 +1,5 @@
 import type { LineItem, LineType } from '../types';
+import { hasCompleteMileageApproval } from '../mileageApproval';
 import { centsToInput } from './format';
 
 /** A LineItem plus a stable client-side id so `{#each}` can key by identity
@@ -27,6 +28,6 @@ export function toEditorRow(l: LineItem): EditorRow {
   return {
     ...l, uid: ++counter,
     feeText: centsToInput(l.feeCents), mileageText: l.mileageCents ? centsToInput(l.mileageCents) : '',
-    approvalCollapsed: false,
+    approvalCollapsed: hasCompleteMileageApproval(l),
   };
 }

@@ -1,11 +1,12 @@
 import { test, expect, describe } from 'vitest';
 import {
   normalizeVin8, isValidVin8, missingFinalizeFields,
+  invoiceFinalizeBlockers,
   findDuplicates, isValidIsoDate, formatIsoDate, isDateOutsidePeriod,
   isValidHstNumber, isValidEmail, isValidTaxPercent, isValidDollars,
   businessFieldErrors, hasNoErrors, type BusinessFields,
 } from './validation';
-import type { LineItem } from './types';
+import type { DraftInvoice, LineItem } from './types';
 
 function line(over: Partial<LineItem> = {}): LineItem {
   return {
@@ -14,6 +15,13 @@ function line(over: Partial<LineItem> = {}): LineItem {
     date: '2026-05-21', vin8: 'XY12AB99', mileageCents: 0,
     mileageApproverId: null, mileageApproverName: '', mileageApprovalDate: '', feeCents: 3800,
     ...over,
+  };
+}
+
+function draft(lines: LineItem[]): DraftInvoice {
+  return {
+    seq: null, year: 2026, issueDate: '2026-07-20',
+    periodStart: '2026-07-13', periodEnd: '2026-07-19', lines,
   };
 }
 
@@ -38,6 +46,54 @@ describe('missingFinalizeFields', () => {
     expect(missingFinalizeFields(bad)).toEqual(
       ['inspection number', 'client', 'location', 'date', 'VIN'],
     );
+  });
+
+  test('includes stable mileage approval labels for compatibility callers', () => {
+    expect(missingFinalizeFields(line({
+      mileageCents: 1800,
+      mileageApproverId: null,
+      mileageApproverName: '',
+      mileageApprovalDate: '2026-02-30',
+    }))).toEqual(['mileage approver', 'mileage approval date']);
+  });
+});
+
+describe('invoiceFinalizeBlockers', () => {
+  test('requires linked approver and valid date only for non-zero mileage', () => {
+    const blockers = invoiceFinalizeBlockers(draft([line({
+      mileageCents: 1800,
+      mileageApproverId: null,
+      mileageApproverName: '',
+      mileageApprovalDate: '2026-02-30',
+    })]));
+    expect(blockers.map((blocker) => blocker.field)).toEqual([
+      'mileageApprover', 'mileageApprovalDate',
+    ]);
+    expect(invoiceFinalizeBlockers(draft([line({ mileageCents: 0 })]))).toEqual([]);
+  });
+
+  test('validates non-zero mileage on both current line types', () => {
+    const lines = (['completed', 'noshow'] as const).map((type) => line({
+      type,
+      mileageCents: 1800,
+      mileageApproverId: null,
+      mileageApproverName: '',
+      mileageApprovalDate: '',
+    }));
+    expect(invoiceFinalizeBlockers(draft(lines)).map(({ lineIndex, field }) => ({
+      lineIndex, field,
+    }))).toEqual([
+      { lineIndex: 0, field: 'mileageApprover' },
+      { lineIndex: 0, field: 'mileageApprovalDate' },
+      { lineIndex: 1, field: 'mileageApprover' },
+      { lineIndex: 1, field: 'mileageApprovalDate' },
+    ]);
+  });
+
+  test('requires at least one invoice row', () => {
+    expect(invoiceFinalizeBlockers(draft([]))).toEqual([
+      { lineIndex: null, field: 'invoice', message: 'Add at least one invoice row.' },
+    ]);
   });
 });
 

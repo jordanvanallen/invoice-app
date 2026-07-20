@@ -1,4 +1,4 @@
-import type { LineItem } from './types';
+import type { DraftInvoice, LineItem } from './types';
 
 export function normalizeVin8(raw: string): string {
   return raw.replace(/\s/g, '').toUpperCase();
@@ -6,17 +6,6 @@ export function normalizeVin8(raw: string): string {
 
 export function isValidVin8(vin8: string): boolean {
   return /^[A-Z0-9]{8}$/.test(vin8);
-}
-
-/** Required fields for finalize, in a stable display order. */
-export function missingFinalizeFields(line: LineItem): string[] {
-  const missing: string[] = [];
-  if (!line.inspectionNumber.trim()) missing.push('inspection number');
-  if (!line.clientName.trim()) missing.push('client');
-  if (!line.location.trim()) missing.push('location');
-  if (!line.date.trim()) missing.push('date');
-  if (!line.vin8.trim()) missing.push('VIN');
-  return missing;
 }
 
 export interface DuplicateReport {
@@ -59,6 +48,80 @@ export function formatIsoDate(value: string): string {
   if (!isValidIsoDate(value)) return value;
   const [year, month, day] = value.split('-').map(Number);
   return `${SHORT_MONTHS[month - 1]} ${day}, ${year}`;
+}
+
+export type InvoiceFinalizeField =
+  | 'invoice' | 'inspectionNumber' | 'client' | 'location' | 'date' | 'vin8'
+  | 'mileageApprover' | 'mileageApprovalDate';
+
+export interface InvoiceFinalizeBlocker {
+  lineIndex: number | null;
+  field: InvoiceFinalizeField;
+  message: string;
+}
+
+type LineFinalizeField = Exclude<InvoiceFinalizeField, 'invoice'>;
+interface LineFinalizeBlocker extends InvoiceFinalizeBlocker {
+  lineIndex: number;
+  field: LineFinalizeField;
+}
+
+function lineFinalizeBlockers(line: LineItem, lineIndex: number): LineFinalizeBlocker[] {
+  const blockers: LineFinalizeBlocker[] = [];
+  if (!line.inspectionNumber.trim()) {
+    blockers.push({ lineIndex, field: 'inspectionNumber', message: 'Enter an inspection number.' });
+  }
+  if (!line.clientName.trim()) {
+    blockers.push({ lineIndex, field: 'client', message: 'Choose a client.' });
+  }
+  if (!line.location.trim()) {
+    blockers.push({ lineIndex, field: 'location', message: 'Choose a location.' });
+  }
+  if (!line.date.trim()) {
+    blockers.push({ lineIndex, field: 'date', message: 'Choose a date.' });
+  }
+  if (!line.vin8.trim()) {
+    blockers.push({ lineIndex, field: 'vin8', message: 'Enter the last 8 of the VIN.' });
+  }
+  if (line.mileageCents > 0) {
+    if (line.mileageApproverId == null || !line.mileageApproverName.trim()) {
+      blockers.push({
+        lineIndex,
+        field: 'mileageApprover',
+        message: 'Select a saved approver or choose Add new approver.',
+      });
+    }
+    if (!isValidIsoDate(line.mileageApprovalDate)) {
+      blockers.push({
+        lineIndex,
+        field: 'mileageApprovalDate',
+        message: 'Choose a valid approval date.',
+      });
+    }
+  }
+  return blockers;
+}
+
+export function invoiceFinalizeBlockers(draft: DraftInvoice): InvoiceFinalizeBlocker[] {
+  if (draft.lines.length === 0) {
+    return [{ lineIndex: null, field: 'invoice', message: 'Add at least one invoice row.' }];
+  }
+  return draft.lines.flatMap(lineFinalizeBlockers);
+}
+
+const FINALIZE_FIELD_LABELS: Record<LineFinalizeField, string> = {
+  inspectionNumber: 'inspection number',
+  client: 'client',
+  location: 'location',
+  date: 'date',
+  vin8: 'VIN',
+  mileageApprover: 'mileage approver',
+  mileageApprovalDate: 'mileage approval date',
+};
+
+/** Required fields for finalize, in a stable display order. */
+export function missingFinalizeFields(line: LineItem): string[] {
+  return lineFinalizeBlockers(line, 0).map(({ field }) => FINALIZE_FIELD_LABELS[field]);
 }
 
 /** ISO date strings compare correctly with simple string comparison. */
