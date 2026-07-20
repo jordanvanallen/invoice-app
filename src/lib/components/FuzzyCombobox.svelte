@@ -9,6 +9,11 @@
     noun = 'item',
     onAddNew,
     warning = '',
+    inputId = `cb-${Math.random().toString(36).slice(2)}`,
+    required = false,
+    invalid = false,
+    error = '',
+    onEdited = () => {},
   }: {
     label: string;
     entries?: { id: number; name: string }[];
@@ -17,6 +22,11 @@
     noun?: string;
     onAddNew: (name: string) => Promise<number>;
     warning?: string;
+    inputId?: string;
+    required?: boolean;
+    invalid?: boolean;
+    error?: string;
+    onEdited?: () => void;
   } = $props();
 
   let open = $state(false);
@@ -25,12 +35,12 @@
   const result = $derived(comboboxOptions(entries, text));
   const options = $derived(result.options);
   const unlinked = $derived(selectedId === null && text.trim() !== '');
-  const fieldId = `cb-${Math.random().toString(36).slice(2)}`;
 
   function onInput() {
     open = true;
     selectedId = null; // unlinked until a row is committed
     highlight = 0;
+    onEdited();
   }
 
   async function commit(opt: ComboOption) {
@@ -43,6 +53,7 @@
       text = opt.label;
     }
     open = false;
+    onEdited();
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -87,15 +98,23 @@
 </script>
 
 <div class="field">
-  {#if label}<label for={fieldId}>{label}</label>{/if}
+  {#if label}<label for={inputId}>{label}</label>{/if}
   <div class="control">
     <input
-      id={fieldId}
+      id={inputId}
       type="text"
       autocomplete="off"
+      role="combobox"
+      aria-autocomplete="list"
+      aria-expanded={open}
+      aria-controls={`${inputId}-listbox`}
+      aria-activedescendant={open && options[highlight] ? `${inputId}-option-${highlight}` : undefined}
+      aria-invalid={invalid}
+      aria-describedby={error ? `${inputId}-error` : undefined}
+      aria-required={required}
       bind:value={text}
       class:linked={selectedId !== null}
-      class:warn={!!warning || unlinked}
+      class:warn={!!error || !!warning || unlinked}
       oninput={onInput}
       onfocus={() => (open = true)}
       onkeydown={onKeydown}
@@ -103,11 +122,14 @@
     />
     {#if unlinked}<span class="dot" title="Not in your list yet"></span>{/if}
     {#if open && options.length}
-      <ul class="menu" role="listbox">
+      <ul id={`${inputId}-listbox`} class="menu" role="listbox">
         {#each options as opt, i}
           <li>
             <button
+              id={`${inputId}-option-${i}`}
               type="button"
+              role="option"
+              aria-selected={i === highlight}
               class:hi={i === highlight}
               onmousedown={(e) => e.preventDefault()}
               onclick={() => commit(opt)}
@@ -123,7 +145,9 @@
       </ul>
     {/if}
   </div>
-  {#if warning}
+  {#if error}
+    <p id={`${inputId}-error`} class="warn-text">{error}</p>
+  {:else if warning}
     <p class="warn-text">{warning}</p>
   {:else if unlinked}
     <p class="warn-text">Not in your list yet — it'll print exactly as typed.</p>

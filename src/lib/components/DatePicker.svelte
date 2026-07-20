@@ -17,8 +17,22 @@
     value?: string;
     ariaLabel?: string;
     block?: boolean;
+    fieldId?: string;
+    required?: boolean;
+    invalid?: boolean;
+    errorId?: string;
+    onChange?: () => void;
   }
-  let { value = $bindable(''), ariaLabel = 'Date', block = false }: Props = $props();
+  let {
+    value = $bindable(''),
+    ariaLabel = 'Date',
+    block = false,
+    fieldId = `dp-${Math.random().toString(36).slice(2)}`,
+    required = false,
+    invalid = false,
+    errorId = '',
+    onChange = () => {},
+  }: Props = $props();
 
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'];
@@ -80,6 +94,7 @@
   function pick(day: number) {
     value = toIso(new Date(view.getFullYear(), view.getMonth(), day));
     open = false;
+    onChange();
   }
 
   // WebKitGTK can emit a duplicate "ghost" click after a popover closes mid-click
@@ -119,8 +134,20 @@
 />
 
 <div class="dp" class:block bind:this={root}>
-  <button type="button" class="field" onpointerdown={arm} onclick={(event) => guard(event, toggle)}
-    bind:this={fieldEl} aria-label={ariaLabel} aria-haspopup="dialog" aria-expanded={open}>
+  <!-- svelte-ignore a11y_role_supports_aria_props_implicit -->
+  <button
+    id={fieldId}
+    type="button"
+    class="field"
+    onpointerdown={arm}
+    onclick={(event) => guard(event, toggle)}
+    bind:this={fieldEl}
+    aria-label={`${ariaLabel}${required ? ' (required)' : ''}`}
+    aria-haspopup="dialog"
+    aria-expanded={open}
+    aria-invalid={invalid}
+    aria-describedby={errorId || undefined}
+  >
     <span class:placeholder={!selected}>{label(value)}</span>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
       stroke-width="2" aria-hidden="true">
