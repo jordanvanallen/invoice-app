@@ -1,10 +1,11 @@
 <script lang="ts">
   import StatusPill from './StatusPill.svelte';
   import { formatDollars } from '$lib/money';
+  import { mileageApprovalText } from '$lib/mileageApproval';
   import { bpToPercentInput } from '$lib/ui/format';
   import type { FinalizedSnapshot, LineItem } from '$lib/types';
 
-  let { snap }: { snap: FinalizedSnapshot } = $props();
+  let { snap, preview = false }: { snap: FinalizedSnapshot; preview?: boolean } = $props();
 
   const completed = $derived(snap.lines.filter((l) => l.type === 'completed'));
   const noshow = $derived(snap.lines.filter((l) => l.type === 'noshow'));
@@ -42,6 +43,7 @@
   </div>
 
   {#snippet section(heading: string, rows: LineItem[], mileage: boolean)}
+    {@const columnCount = mileage ? 8 : 7}
     <h3>{heading}</h3>
     <table>
       <thead>
@@ -55,6 +57,14 @@
             {#if mileage}<td class="r tnum">{l.mileageCents ? formatDollars(l.mileageCents) : ''}</td>{/if}
             <td class="r tnum">{formatDollars(l.feeCents)}</td>
           </tr>
+          {@const approvalText = mileageApprovalText(l)}
+          {#if approvalText || (preview && l.mileageCents > 0)}
+            <tr class="mileage-approval">
+              <td colspan={columnCount}>
+                {approvalText ?? 'Mileage approval required'}
+              </td>
+            </tr>
+          {/if}
         {/each}
       </tbody>
     </table>
@@ -95,6 +105,7 @@
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); }
   th { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .4px; color: var(--text-secondary); }
+  .mileage-approval td { padding-top: var(--sp-1); color: var(--text-secondary); font-size: var(--fs-xs); font-style: italic; }
   .r { text-align: right; }
   .totals { margin: var(--sp-6) 0 0; margin-left: auto; max-width: 360px; display: flex; flex-direction: column; gap: var(--sp-1); }
   .line { display: flex; justify-content: space-between; color: var(--text-secondary); padding: var(--sp-1) 0; }

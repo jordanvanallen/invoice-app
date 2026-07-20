@@ -1,5 +1,6 @@
 import type { FinalizedSnapshot, LineItem } from '../types';
 import { formatDollars } from '../money';
+import { mileageApprovalText } from '../mileageApproval';
 import { bpToPercentInput } from '../ui/format';
 
 const TEAL = '#0E7C7B';
@@ -10,6 +11,9 @@ const MUTED = '#5A6663';
 export type InvoiceDoc = Record<string, unknown>;
 
 function sectionTable(title: string, rows: LineItem[], showMileage: boolean): unknown[] {
+  const widths = showMileage
+    ? ['auto', 'auto', '*', 'auto', 'auto', 'auto', 'auto', 'auto']
+    : ['auto', 'auto', '*', 'auto', 'auto', 'auto', 'auto'];
   const head: unknown[] = [
     { text: '#', style: 'th' },
     { text: 'Inspection #', style: 'th' },
@@ -34,11 +38,15 @@ function sectionTable(title: string, rows: LineItem[], showMileage: boolean): un
     if (showMileage) row.push({ text: l.mileageCents ? formatDollars(l.mileageCents) : '', alignment: 'right' });
     row.push({ text: formatDollars(l.feeCents), alignment: 'right' });
     body.push(row);
+    const approvalText = mileageApprovalText(l);
+    if (approvalText) {
+      body.push([
+        { text: approvalText, colSpan: widths.length, style: 'approval' },
+        ...Array(widths.length - 1).fill(''),
+      ]);
+    }
   });
 
-  const widths = showMileage
-    ? ['auto', 'auto', '*', 'auto', 'auto', 'auto', 'auto', 'auto']
-    : ['auto', 'auto', '*', 'auto', 'auto', 'auto', 'auto'];
   return [
     { text: title, style: 'sectionHead', margin: [0, 12, 0, 4] },
     { table: { headerRows: 1, widths, body }, layout: 'lightHorizontalLines' },
@@ -121,6 +129,7 @@ export function buildInvoiceDoc(snap: FinalizedSnapshot): InvoiceDoc {
       th: { bold: true, color: TEAL, fontSize: 8 },
       sectionHead: { bold: true, color: TEAL, fontSize: 11 },
       label: { bold: true, color: MUTED, fontSize: 8, margin: [0, 0, 0, 2] },
+      approval: { color: MUTED, fontSize: 8, italics: true },
     },
     footer: {
       margin: [40, 16, 40, 0],

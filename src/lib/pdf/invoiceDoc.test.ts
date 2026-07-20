@@ -15,6 +15,35 @@ function collectText(node: unknown, out: string[] = []): string[] {
   return out;
 }
 
+type PdfCell = string | { text?: string; colSpan?: number };
+
+function cellText(cell: unknown): string {
+  if (typeof cell === 'string') return cell;
+  if (cell && typeof cell === 'object' && 'text' in cell) {
+    const text = (cell as { text?: unknown }).text;
+    return typeof text === 'string' ? text : '';
+  }
+  return '';
+}
+
+function inspectionTableBodies(doc: Record<string, unknown>): PdfCell[][][] {
+  const content = doc.content;
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((node) => {
+    if (!node || typeof node !== 'object' || !('table' in node)) return [];
+    const table = (node as { table?: { body?: unknown } }).table;
+    if (!Array.isArray(table?.body)) return [];
+    const body = table.body as PdfCell[][];
+    return body[0]?.some((cell) => cellText(cell) === 'Inspection #') ? [body] : [];
+  });
+}
+
+function rowAfterOwner(body: PdfCell[][], inspectionNumber: string): PdfCell[] {
+  const ownerIndex = body.findIndex((row) => row.some((cell) => cellText(cell) === inspectionNumber));
+  expect(ownerIndex).toBeGreaterThan(0);
+  return body[ownerIndex + 1];
+}
+
 function line(over: Partial<LineItem> = {}): LineItem {
   return {
     type: 'completed', position: 0, inspectionNumber: '12345678', clientId: 1,
@@ -64,6 +93,65 @@ describe('buildInvoiceDoc', () => {
     const withMileage = collectText(buildInvoiceDoc(snap({ lines: [line({ mileageCents: 1500 })] })).content).join(' | ');
     expect(withMileage).toContain('Mileage');
     expect(withMileage).toContain('$15.00');
+  });
+
+  test('adds an unnumbered eight-column approval row immediately after its completed charge', () => {
+    const doc = buildInvoiceDoc(snap({
+      lines: [line({
+        inspectionNumber: 'COMPLETE1', mileageCents: 1500,
+        mileageApproverId: 7, mileageApproverName: 'Jordan Lee',
+        mileageApprovalDate: '2026-07-18',
+      })],
+    }));
+    const [body] = inspectionTableBodies(doc);
+    const approvalRow = rowAfterOwner(body, 'COMPLETE1');
+
+    expect(approvalRow[0]).toMatchObject({
+      text: 'Mileage approved by Jordan Lee on Jul 18, 2026',
+      colSpan: 8,
+    });
+    expect(approvalRow).toHaveLength(8);
+    expect(approvalRow.slice(1)).toEqual(Array(7).fill(''));
+  });
+
+  test('adds approval rows to both completed and no-show tables', () => {
+    const approval = {
+      mileageCents: 1500, mileageApproverId: 7,
+      mileageApproverName: 'Jordan Lee', mileageApprovalDate: '2026-07-18',
+    };
+    const doc = buildInvoiceDoc(snap({ lines: [
+      line({ ...approval, inspectionNumber: 'COMPLETE1' }),
+      line({ ...approval, type: 'noshow', inspectionNumber: 'NOSHOW01' }),
+    ] }));
+    const bodies = inspectionTableBodies(doc);
+
+    expect(bodies).toHaveLength(2);
+    expect(cellText(rowAfterOwner(bodies[0], 'COMPLETE1')[0])).toBe(
+      'Mileage approved by Jordan Lee on Jul 18, 2026',
+    );
+    expect(cellText(rowAfterOwner(bodies[1], 'NOSHOW01')[0])).toBe(
+      'Mileage approved by Jordan Lee on Jul 18, 2026',
+    );
+  });
+
+  test('keeps seven-column zero-mileage tables free of approval rows', () => {
+    const [body] = inspectionTableBodies(buildInvoiceDoc(snap({ lines: [line()] })));
+
+    expect(body).toHaveLength(2);
+    expect(body[1]).toHaveLength(7);
+    expect(collectText(body).join(' | ')).not.toContain('Mileage approved by');
+  });
+
+  test('safely omits approval rows from legacy mileage snapshots with missing approval properties', () => {
+    const legacy = line({ inspectionNumber: 'LEGACY01', mileageCents: 1500 }) as Partial<LineItem>;
+    delete legacy.mileageApproverId;
+    delete legacy.mileageApproverName;
+    delete legacy.mileageApprovalDate;
+    const [body] = inspectionTableBodies(buildInvoiceDoc(snap({ lines: [legacy as LineItem] })));
+
+    expect(body).toHaveLength(2);
+    expect(body[1]).toHaveLength(8);
+    expect(collectText(body).join(' | ')).not.toContain('Mileage approved by');
   });
 
   test('omits the No-Shows table when there are none', () => {

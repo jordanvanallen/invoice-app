@@ -118,6 +118,31 @@ describe('invoice approval component contracts', () => {
     expect(route).toContain('<InvoiceView snap={previewSnap} preview />');
   });
 
+  test('invoice view prints row-local approval evidence and preview-only missing approval copy', () => {
+    const view = readSource('src/lib/components/InvoiceView.svelte');
+
+    expect(view).toContain("import { mileageApprovalText } from '$lib/mileageApproval';");
+    expect(view).toContain('let { snap, preview = false }');
+    expect(view).toContain('{@const columnCount = mileage ? 8 : 7}');
+    expect(view).toContain('{@const approvalText = mileageApprovalText(l)}');
+    expect(view).toContain('{#if approvalText || (preview && l.mileageCents > 0)}');
+    expect(view).toContain('<tr class="mileage-approval">');
+    expect(view).toContain('<td colspan={columnCount}>');
+    expect(view).toContain("{approvalText ?? 'Mileage approval required'}");
+    expect(view).toMatch(
+      /<\/tr>\s*{@const approvalText = mileageApprovalText\(l\)}\s*{#if approvalText \|\| \(preview && l\.mileageCents > 0\)}\s*<tr class="mileage-approval">/,
+    );
+  });
+
+  test('invoice route uses the declared preview prop without the temporary type bridge', () => {
+    const route = readSource('src/routes/+page.svelte');
+
+    expect(route).toContain("import InvoiceView from '$lib/components/InvoiceView.svelte';");
+    expect(route).not.toContain('InvoiceViewBase');
+    expect(route).not.toContain('type Component');
+    expect(route).not.toContain('Task 8 consumes this route-level preview flag');
+  });
+
   test('invoice route derives row counts and focus targets from shared blockers', () => {
     const route = readSource('src/routes/+page.svelte');
     const jumpHandler = route.slice(

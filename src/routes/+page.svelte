@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick, type Component } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { onNavigate } from '$app/navigation';
   import InvoiceSection from '$lib/components/InvoiceSection.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
@@ -7,7 +7,7 @@
   import BigButton from '$lib/components/BigButton.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import DatePicker from '$lib/components/DatePicker.svelte';
-  import InvoiceViewBase from '$lib/components/InvoiceView.svelte';
+  import InvoiceView from '$lib/components/InvoiceView.svelte';
   import { loadSettings } from '$lib/stores/settings';
   import { loadClients, loadLocations, loadApprovers, addClient as addClientDb, addLocation as addLocationDb, addApprover as addApproverDb } from '$lib/stores/catalog';
   import { getDb } from '$lib/db';
@@ -41,9 +41,6 @@
   import type { Settings, DraftInvoice, FinalizedSnapshot } from '$lib/types';
   import type { CatalogEntry } from '$lib/db/catalog-repo';
   import { toEditorRow, type EditorRow } from '$lib/ui/editorRow';
-
-  // Task 8 consumes this route-level preview flag and adds it to InvoiceView.
-  const InvoiceView = InvoiceViewBase as Component<{ snap: FinalizedSnapshot; preview?: boolean }>;
 
   let loaded = $state(false);
   let settings = $state<Settings | null>(null);
