@@ -18,6 +18,15 @@ interface RenameOptions extends CommonOptions {
   rename: (id: number, name: string) => Promise<void>;
 }
 
+interface AddOptions extends CommonOptions {
+  name: string;
+  add: (name: string) => Promise<void>;
+}
+
+export interface CatalogAddResult extends CatalogActionResult {
+  added: boolean;
+}
+
 interface ToggleOptions extends CommonOptions {
   entry: CatalogEntry;
   setActive: (id: number, active: boolean) => Promise<void>;
@@ -74,6 +83,29 @@ export async function runCatalogRename(options: RenameOptions): Promise<CatalogA
   return withRefreshedEntries(options, `Renamed ${options.noun} to "${name}".`);
 }
 
+export async function runCatalogAdd(options: AddOptions): Promise<CatalogAddResult> {
+  const name = options.name.trim();
+  const existing = options.table === 'clients' || options.table === 'approvers'
+    ? options.entries.find((entry) => entry.name.toLowerCase() === name.toLowerCase())
+    : undefined;
+
+  try {
+    await options.add(name);
+  } catch (error) {
+    return {
+      entries: options.entries,
+      note: error instanceof Error ? error.message : String(error),
+      added: false,
+    };
+  }
+
+  const result = await withRefreshedEntries(
+    options,
+    existing ? `"${existing.name}" is already in your list.` : `Added ${options.noun} "${name}".`,
+  );
+  return { ...result, added: true };
+}
+
 export async function runCatalogToggle(options: ToggleOptions): Promise<CatalogActionResult> {
   const action = options.entry.active ? 'deactivate' : 'activate';
   try {
@@ -82,7 +114,8 @@ export async function runCatalogToggle(options: ToggleOptions): Promise<CatalogA
     return withRefreshedEntries(options, failureMessage(action, options.noun, error));
   }
 
-  return withRefreshedEntries(options, '');
+  const completed = options.entry.active ? 'Deactivated' : 'Activated';
+  return withRefreshedEntries(options, `${completed} ${options.noun} "${options.entry.name}".`);
 }
 
 export async function runCatalogDelete(options: DeleteOptions): Promise<CatalogActionResult> {

@@ -1,8 +1,12 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import {
     applyComboboxInputEdit,
+    comboboxBlurState,
+    comboboxKeyAction,
     comboboxOptions,
     comboboxPopupState,
+    runComboboxAddAction,
     type ComboOption,
   } from '$lib/ui/combobox';
 
@@ -36,11 +40,20 @@
 
   let open = $state(false);
   let highlight = $state(0);
+  let inputEl = $state<HTMLInputElement>();
+  let suppressBlurCommit = $state(false);
+  let pending = $state(false);
+  let status = $state('');
+  let statusError = $state(false);
 
   const result = $derived(comboboxOptions(entries, text));
   const options = $derived(result.options);
   const popup = $derived(comboboxPopupState({ inputId, open, optionCount: options.length, highlight }));
   const unlinked = $derived(selectedId === null && text.trim() !== '');
+  const describedBy = $derived([
+    error ? `${inputId}-error` : '',
+    status ? `${inputId}-status` : '',
+  ].filter(Boolean).join(' ') || undefined);
 
   function onInput(event: Event) {
     applyComboboxInputEdit(
@@ -53,54 +66,68 @@
       },
       onEdited,
     );
+    suppressBlurCommit = false;
+    status = '';
+    statusError = false;
   }
 
   async function commit(opt: ComboOption) {
+    if (pending) return;
     if (opt.kind === 'entry') {
       selectedId = opt.id ?? null;
       text = opt.label;
+      status = '';
+      statusError = false;
     } else {
-      const id = await onAddNew(opt.label);
-      selectedId = id;
+      pending = true;
+      status = `Adding ${noun} "${opt.label}"…`;
+      statusError = false;
+      const result = await runComboboxAddAction({
+        pending: false,
+        noun,
+        label: opt.label,
+        add: onAddNew,
+      });
+      pending = false;
+      if (result.status === 'ignored') return;
+      if (result.status === 'failed') {
+        status = result.message;
+        statusError = true;
+        open = true;
+        await tick();
+        inputEl?.focus();
+        return;
+      }
+      selectedId = result.id;
       text = opt.label;
+      status = result.message;
     }
     open = false;
     onEdited();
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      open = true;
-      return;
-    }
-    if (e.key === 'ArrowDown') {
-      highlight = Math.min(highlight + 1, options.length - 1);
-      e.preventDefault();
-    } else if (e.key === 'ArrowUp') {
-      highlight = Math.max(0, highlight - 1);
-      e.preventDefault();
-    } else if (e.key === 'Enter') {
-      if (open && options[highlight]) {
-        commit(options[highlight]);
-        e.preventDefault();
-      }
-    } else if (e.key === 'Tab') {
-      // Leave the field WITHOUT committing a highlighted option — Tab must never
-      // silently create a new entry or pick a fuzzy guess. blur binds only an exact match.
-      open = false;
-    } else if (e.key === 'Escape') {
-      open = false;
-    }
+    const action = comboboxKeyAction({ open, highlight, optionCount: options.length, pending }, e.key);
+    open = action.open;
+    highlight = action.highlight;
+    suppressBlurCommit = action.suppressBlurCommit;
+    if (action.preventDefault) e.preventDefault();
+    if (action.commitIndex !== null) void commit(options[action.commitIndex]);
   }
 
   function onBlur() {
-    // Never silently pick the WRONG entry: only auto-bind on an EXACT name match.
-    if (selectedId === null && result.exactId !== null) {
-      selectedId = result.exactId;
-      const m = entries.find((x) => x.id === result.exactId);
-      if (m) text = m.name;
-    }
-    open = false;
+    const next = comboboxBlurState({
+      selectedId,
+      text,
+      exactMatch: result.exactId === null
+        ? undefined
+        : entries.find((entry) => entry.id === result.exactId),
+      suppressCommit: suppressBlurCommit,
+    });
+    selectedId = next.selectedId;
+    text = next.text;
+    open = next.open;
+    suppressBlurCommit = next.suppressBlurCommit;
   }
 
   // Keep the highlighted index valid as the option list changes under typing.
@@ -122,9 +149,11 @@
       aria-controls={popup.controlsId}
       aria-activedescendant={popup.activeDescendantId}
       aria-invalid={invalid}
-      aria-describedby={error ? `${inputId}-error` : undefined}
+      aria-describedby={describedBy}
       aria-required={required}
+      aria-busy={pending}
       value={text}
+      bind:this={inputEl}
       class:linked={selectedId !== null}
       class:warn={!!error || !!warning || unlinked}
       oninput={onInput}
@@ -140,8 +169,10 @@
             <button
               id={`${inputId}-option-${i}`}
               type="button"
+              tabindex="-1"
               role="option"
               aria-selected={popup.activeIndex === i}
+              disabled={pending}
               class:hi={i === highlight}
               onmousedown={(e) => e.preventDefault()}
               onclick={() => commit(opt)}
@@ -164,6 +195,13 @@
   {:else if unlinked}
     <p class="warn-text">Not in your list yet — it'll print exactly as typed.</p>
   {/if}
+  <p
+    id={`${inputId}-status`}
+    class="status-text"
+    class:error={statusError}
+    class:visible={status !== ''}
+    role="status" aria-live="polite"
+  >{status}</p>
 </div>
 
 <style>
@@ -189,4 +227,8 @@
   .menu button.hi, .menu button:hover { background: var(--accent-tint); }
   .add { color: var(--accent-strong); font-weight: 600; }
   .warn-text { margin: 0; font-size: var(--fs-sm); color: var(--amber-600); }
+  .status-text { margin: 0; font-size: var(--fs-sm); color: var(--green-600); }
+  .status-text.error { color: var(--red-600); }
+  .status-text:not(.visible) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 </style>

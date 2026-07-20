@@ -3,7 +3,7 @@
   import { getDb } from '$lib/db';
   import { listEntries, addEntry, renameEntry, setActive, deleteEntryIfUnused, type CatalogTable, type CatalogEntry } from '$lib/db/catalog-repo';
   import BigButton from './BigButton.svelte';
-  import { runCatalogRename, runCatalogToggle, runCatalogDelete } from './catalogManagerActions';
+  import { runCatalogAdd, runCatalogRename, runCatalogToggle, runCatalogDelete } from './catalogManagerActions';
 
   interface Props {
     table: CatalogTable;
@@ -28,17 +28,14 @@
   async function add() {
     const name = newName.trim();
     if (!name) return;
-    const existing = table === 'clients' || table === 'approvers'
-      ? entries.find((e) => e.name.toLowerCase() === name.toLowerCase())
-      : null;
-    try {
-      await addEntry(await getDb(), table, name);
-      newName = '';
-      note = existing ? `"${existing.name}" is already in your list.` : '';
-      await refresh();
-    } catch (e) {
-      note = (e as Error).message;
-    }
+    const result = await runCatalogAdd({
+      table, noun, entries, name,
+      add: async (nextName) => { await addEntry(await getDb(), table, nextName); },
+      refresh: loadEntries,
+    });
+    entries = result.entries;
+    note = result.note;
+    if (result.added) newName = '';
   }
   async function rename(id: number, name: string) {
     const result = await runCatalogRename({
@@ -87,8 +84,9 @@
     {#each entries as e (e.id)}
       <li class:inactive={!e.active}>
         <input aria-label={`Rename ${noun} ${e.name}`} class="name" value={e.name} onblur={(ev) => rename(e.id, (ev.currentTarget as HTMLInputElement).value)} />
-        <button class="toggle" class:on={e.active} onclick={() => toggle(e)}>{e.active ? '● Active' : 'Inactive'}</button>
-        <button class="del" onclick={() => del(e)}>Delete</button>
+        <button aria-label={`${e.active ? 'Deactivate' : 'Activate'} ${noun} ${e.name}`}
+          class="toggle" class:on={e.active} onclick={() => toggle(e)}>{e.active ? '● Active' : 'Inactive'}</button>
+        <button aria-label={`Delete ${noun} ${e.name}`} class="del" onclick={() => del(e)}>Delete</button>
       </li>
     {/each}
   </ul>

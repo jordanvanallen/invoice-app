@@ -33,6 +33,115 @@ export interface ComboboxInputEditState {
   highlight: 0;
 }
 
+export interface ComboboxKeyState {
+  open: boolean;
+  highlight: number;
+  optionCount: number;
+  pending: boolean;
+}
+
+export interface ComboboxKeyResult {
+  open: boolean;
+  highlight: number;
+  commitIndex: number | null;
+  preventDefault: boolean;
+  suppressBlurCommit: boolean;
+}
+
+export function comboboxKeyAction(state: ComboboxKeyState, key: string): ComboboxKeyResult {
+  const unchanged = {
+    open: state.open,
+    highlight: state.highlight,
+    commitIndex: null,
+    preventDefault: false,
+    suppressBlurCommit: false,
+  };
+
+  if (!state.open && (key === 'ArrowDown' || key === 'ArrowUp')) {
+    return { ...unchanged, open: true };
+  }
+  if (key === 'ArrowDown') {
+    return {
+      ...unchanged,
+      highlight: state.optionCount > 0
+        ? Math.min(state.highlight + 1, state.optionCount - 1)
+        : 0,
+      preventDefault: true,
+    };
+  }
+  if (key === 'ArrowUp') {
+    return { ...unchanged, highlight: Math.max(0, state.highlight - 1), preventDefault: true };
+  }
+  if (key === 'Enter' && state.open && state.highlight >= 0 && state.highlight < state.optionCount) {
+    return {
+      ...unchanged,
+      commitIndex: state.pending ? null : state.highlight,
+      preventDefault: true,
+    };
+  }
+  if (key === 'Tab') {
+    return { ...unchanged, open: false, suppressBlurCommit: true };
+  }
+  if (key === 'Escape') {
+    return { ...unchanged, open: false };
+  }
+  return unchanged;
+}
+
+export interface ComboboxBlurStateInput {
+  selectedId: number | null;
+  text: string;
+  exactMatch: { id: number; name: string } | undefined;
+  suppressCommit: boolean;
+}
+
+export interface ComboboxBlurState {
+  selectedId: number | null;
+  text: string;
+  open: false;
+  suppressBlurCommit: false;
+}
+
+interface ComboboxAddActionInput {
+  pending: boolean;
+  noun: string;
+  label: string;
+  add: (label: string) => Promise<number>;
+}
+
+export type ComboboxAddActionResult =
+  | { status: 'ignored' }
+  | { status: 'added'; id: number; message: string }
+  | { status: 'failed'; message: string };
+
+export async function runComboboxAddAction(
+  input: ComboboxAddActionInput,
+): Promise<ComboboxAddActionResult> {
+  if (input.pending) return { status: 'ignored' };
+  try {
+    const id = await input.add(input.label);
+    return { status: 'added', id, message: `Added ${input.noun} "${input.label}".` };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.trim() : '';
+    return {
+      status: 'failed',
+      message: `Couldn't add this ${input.noun}${detail ? `: ${detail}` : '.'}`,
+    };
+  }
+}
+
+export function comboboxBlurState(input: ComboboxBlurStateInput): ComboboxBlurState {
+  const exactMatch = !input.suppressCommit && input.selectedId === null
+    ? input.exactMatch
+    : undefined;
+  return {
+    selectedId: exactMatch?.id ?? input.selectedId,
+    text: exactMatch?.name ?? input.text,
+    open: false,
+    suppressBlurCommit: false,
+  };
+}
+
 /** Apply one raw-input transition completely before notifying its observer. */
 export function applyComboboxInputEdit(
   text: string,

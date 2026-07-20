@@ -1,10 +1,61 @@
 import { describe, expect, test } from 'vitest';
 import type { CatalogEntry } from '$lib/db/catalog-repo';
-import { runCatalogDelete, runCatalogRename, runCatalogToggle } from './catalogManagerActions';
+import { runCatalogAdd, runCatalogDelete, runCatalogRename, runCatalogToggle } from './catalogManagerActions';
 
 const jordan: CatalogEntry = { id: 7, name: 'Jordan Lee', active: true };
 
 describe('CatalogManager actions', () => {
+  test('successful add returns refreshed state and a noun-specific status', async () => {
+    const added = { id: 8, name: 'Casey Morgan', active: true };
+    let persistedName = '';
+
+    const result = await runCatalogAdd({
+      table: 'approvers',
+      noun: 'approver',
+      entries: [jordan],
+      name: '  Casey Morgan  ',
+      add: async (name) => { persistedName = name; },
+      refresh: async () => [jordan, added],
+    });
+
+    expect(persistedName).toBe('Casey Morgan');
+    expect(result).toEqual({
+      entries: [jordan, added],
+      note: 'Added approver "Casey Morgan".',
+      added: true,
+    });
+  });
+
+  test('successful duplicate add preserves the existing already-listed status', async () => {
+    await expect(runCatalogAdd({
+      table: 'approvers',
+      noun: 'approver',
+      entries: [jordan],
+      name: 'jordan lee',
+      add: async () => undefined,
+      refresh: async () => [jordan],
+    })).resolves.toEqual({
+      entries: [jordan],
+      note: '"Jordan Lee" is already in your list.',
+      added: true,
+    });
+  });
+
+  test('add failure preserves its existing message and input state', async () => {
+    await expect(runCatalogAdd({
+      table: 'approvers',
+      noun: 'approver',
+      entries: [jordan],
+      name: 'Casey Morgan',
+      add: async () => { throw new Error('database unavailable'); },
+      refresh: async () => { throw new Error('refresh must not run'); },
+    })).resolves.toEqual({
+      entries: [jordan],
+      note: 'database unavailable',
+      added: false,
+    });
+  });
+
   test('blank rename restores persisted state and returns a noun-specific validation status', async () => {
     let renameCalled = false;
     let refreshCount = 0;
@@ -113,6 +164,27 @@ describe('CatalogManager actions', () => {
       entries: [jordan],
       note: "Couldn't deactivate this approver: database unavailable",
     });
+  });
+
+  test('successful activation and deactivation return named polite statuses', async () => {
+    const inactive = { ...jordan, active: false };
+    await expect(runCatalogToggle({
+      table: 'approvers',
+      noun: 'approver',
+      entries: [inactive],
+      entry: inactive,
+      setActive: async () => undefined,
+      refresh: async () => [jordan],
+    })).resolves.toEqual({ entries: [jordan], note: 'Activated approver "Jordan Lee".' });
+
+    await expect(runCatalogToggle({
+      table: 'approvers',
+      noun: 'approver',
+      entries: [jordan],
+      entry: jordan,
+      setActive: async () => undefined,
+      refresh: async () => [inactive],
+    })).resolves.toEqual({ entries: [inactive], note: 'Deactivated approver "Jordan Lee".' });
   });
 
   test('delete failure returns a noun-specific error and refreshed state', async () => {

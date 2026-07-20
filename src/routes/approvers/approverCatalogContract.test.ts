@@ -21,16 +21,20 @@ describe('approver catalog UI contract', () => {
     expect(manager).toMatch(/noun:\s*string/);
     expect(manager).toContain('aria-label={`Add ${noun}`}');
     expect(manager).toContain('aria-label={`Rename ${noun} ${e.name}`}');
+    expect(manager).toContain("aria-label={`${e.active ? 'Deactivate' : 'Activate'} ${noun} ${e.name}`}");
+    expect(manager).toContain('aria-label={`Delete ${noun} ${e.name}`}');
     expect(manager).toContain('role="status" aria-live="polite"');
   });
 
   test('catalog manager applies refreshed state and status from guarded actions', () => {
     const manager = readSource('src/lib/components/CatalogManager.svelte');
 
+    expect(manager).toContain('const result = await runCatalogAdd({');
     expect(manager).toContain('const result = await runCatalogRename({');
     expect(manager).toContain('const result = await runCatalogToggle({');
     expect(manager).toContain('const result = await runCatalogDelete({');
-    expect(manager.match(/entries = result\.entries;\n\s+note = result\.note;/g)).toHaveLength(3);
+    expect(manager.match(/entries = result\.entries;\n\s+note = result\.note;/g)).toHaveLength(4);
+    expect(manager).toContain("if (result.added) newName = '';");
   });
 
   test('every catalog page supplies the required singular noun', () => {

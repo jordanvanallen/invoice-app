@@ -1,4 +1,14 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+  import {
+    calendarDateLabel,
+    initialCalendarDate,
+    moveCalendarDateByKey,
+    moveCalendarMonth,
+    parseIsoDate,
+    toIsoDate,
+  } from '$lib/ui/date';
+
   /**
    * A self-contained calendar picker that replaces <input type="date">.
    *
@@ -41,24 +51,18 @@
   let open = $state(false);
   let root = $state<HTMLElement>();
   let fieldEl = $state<HTMLButtonElement>();
+  let dialogEl = $state<HTMLDivElement>();
   let popStyle = $state('');
   // First day of the month currently shown in the popover.
   let view = $state(new Date());
+  let focusDate = $state(new Date());
 
-  /** Parse an ISO date as a LOCAL date (avoids the UTC off-by-one of new Date(iso)). */
-  function parse(iso: string): Date | null {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-    return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
-  }
-  function toIso(d: Date): string {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }
   function label(iso: string): string {
-    const d = parse(iso);
+    const d = parseIsoDate(iso);
     return d ? d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'Pick a date';
   }
 
-  const selected = $derived(parse(value));
+  const selected = $derived(parseIsoDate(value));
   const grid = $derived.by(() => {
     const y = view.getFullYear(), mo = view.getMonth();
     const lead = new Date(y, mo, 1).getDay();
@@ -66,7 +70,10 @@
     const cells: (number | null)[] = [];
     for (let i = 0; i < lead; i++) cells.push(null);
     for (let d = 1; d <= days; d++) cells.push(d);
-    return cells;
+    while (cells.length % 7 !== 0) cells.push(null);
+    const weeks: (number | null)[][] = [];
+    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+    return weeks;
   });
 
   /** Anchor the popover to the field with fixed positioning so no clipping
@@ -85,16 +92,32 @@
     }
     popStyle = `top:${top}px;left:${left}px;`;
   }
-  function toggle() {
-    if (open) { open = false; return; }
-    view = selected ? new Date(selected.getFullYear(), selected.getMonth(), 1) : new Date();
+  async function focusDay() {
+    await tick();
+    const target = document.getElementById(`${fieldId}-day-${toIsoDate(focusDate)}`) as HTMLButtonElement | null
+      ?? root?.querySelector<HTMLButtonElement>('.day');
+    target?.focus();
+  }
+  async function closeAndRestoreFocus() {
+    open = false;
+    await tick();
+    fieldEl?.focus();
+  }
+  async function toggle() {
+    if (open) { await closeAndRestoreFocus(); return; }
+    const initial = initialCalendarDate(value);
+    focusDate = initial;
+    view = new Date(initial.getFullYear(), initial.getMonth(), 1);
     place();
     open = true;
+    await focusDay();
   }
-  function pick(day: number) {
-    value = toIso(new Date(view.getFullYear(), view.getMonth(), day));
+  async function pick(day: number) {
+    value = toIsoDate(dateForDay(day));
     open = false;
     onChange();
+    await tick();
+    fieldEl?.focus();
   }
 
   // WebKitGTK can emit a duplicate "ghost" click after a popover closes mid-click
@@ -115,20 +138,61 @@
     armed = false;
     action();
   }
-  function step(delta: number) { view = new Date(view.getFullYear(), view.getMonth() + delta, 1); }
+  function step(delta: number) {
+    focusDate = moveCalendarMonth(focusDate, delta);
+    view = new Date(focusDate.getFullYear(), focusDate.getMonth(), 1);
+  }
+
+  async function onDayKeydown(event: KeyboardEvent, date: Date) {
+    const next = moveCalendarDateByKey(date, event.key);
+    if (!next) return;
+    event.preventDefault();
+    focusDate = next;
+    view = new Date(next.getFullYear(), next.getMonth(), 1);
+    await focusDay();
+  }
+
+  function onDialogKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Tab' || !dialogEl) return;
+    const focusable = dialogEl.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, [tabindex]:not([tabindex="-1"])');
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function onWindowKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      void closeAndRestoreFocus();
+    }
+  }
 
   function onDocPointer(e: MouseEvent) {
     if (open && root && !root.contains(e.target as Node)) open = false;
+  }
+  function dateForDay(day: number): Date {
+    return new Date(view.getFullYear(), view.getMonth(), day);
   }
   function isSel(day: number): boolean {
     return !!selected && selected.getFullYear() === view.getFullYear()
       && selected.getMonth() === view.getMonth() && selected.getDate() === day;
   }
+  function isFocused(day: number): boolean {
+    return focusDate.getFullYear() === view.getFullYear()
+      && focusDate.getMonth() === view.getMonth() && focusDate.getDate() === day;
+  }
 </script>
 
 <svelte:window
   onmousedown={onDocPointer}
-  onkeydown={(e) => { if (e.key === 'Escape') open = false; }}
+  onkeydown={onWindowKeydown}
   onresize={() => (open = false)}
   onscroll={() => (open = false)}
 />
@@ -156,21 +220,37 @@
   </button>
 
   {#if open}
-    <div class="pop" role="dialog" aria-label="Choose a date" style={popStyle}>
+    <div class="pop" bind:this={dialogEl} onkeydown={onDialogKeydown}
+      role="dialog" aria-modal="true" aria-label="Choose a date" tabindex="-1" style={popStyle}>
       <div class="nav">
         <button type="button" onclick={() => step(-1)} aria-label="Previous month">‹</button>
         <span class="cap">{MONTHS[view.getMonth()]} {view.getFullYear()}</span>
         <button type="button" onclick={() => step(1)} aria-label="Next month">›</button>
       </div>
       <div class="dow">{#each DOW as d}<span>{d}</span>{/each}</div>
-      <div class="days">
-        {#each grid as day}
-          {#if day === null}
-            <span></span>
-          {:else}
-            <button type="button" class="day" class:sel={isSel(day)}
-              onpointerdown={arm} onclick={(event) => guard(event, () => pick(day))}>{day}</button>
-          {/if}
+      <div class="days" role="grid" aria-label={`${MONTHS[view.getMonth()]} ${view.getFullYear()}`}>
+        {#each grid as week}
+          <div class="week" role="row">
+            {#each week as day}
+              {#if day === null}
+                <div role="gridcell"></div>
+              {:else}
+                <div role="gridcell" aria-selected={isSel(day)}>
+                  <button
+                    id={`${fieldId}-day-${toIsoDate(dateForDay(day))}`}
+                    type="button"
+                    class="day"
+                    class:sel={isSel(day)}
+                    aria-label={calendarDateLabel(dateForDay(day))}
+                    tabindex={isFocused(day) ? 0 : -1}
+                    onpointerdown={arm}
+                    onclick={(event) => guard(event, () => pick(day))}
+                    onkeydown={(event) => onDayKeydown(event, dateForDay(day))}
+                  >{day}</button>
+                </div>
+              {/if}
+            {/each}
+          </div>
         {/each}
       </div>
     </div>
@@ -210,11 +290,14 @@
   }
   .nav button:hover { background: var(--accent-tint); }
 
-  .dow, .days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+  .dow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+  .days { display: flex; flex-direction: column; gap: 2px; }
+  .week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+  [role="gridcell"] { min-width: 0; }
   .dow { margin-bottom: 2px; }
   .dow span { text-align: center; font-size: var(--fs-sm); font-weight: 600; color: var(--text-muted); padding: 2px 0; }
   .day {
-    aspect-ratio: 1; min-height: 36px; min-width: 0; border: 1px solid transparent; background: transparent;
+    aspect-ratio: 1; min-height: 36px; width: 100%; min-width: 0; border: 1px solid transparent; background: transparent;
     color: var(--text-primary); border-radius: var(--r-sm); font-size: var(--fs-base); cursor: pointer;
   }
   .day:hover { background: var(--accent-tint); }

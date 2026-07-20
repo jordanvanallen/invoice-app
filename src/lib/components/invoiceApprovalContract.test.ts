@@ -45,23 +45,43 @@ describe('invoice approval component contracts', () => {
     expect(source).not.toContain('{#if open && options.length}');
   });
 
-  test('combobox retains explicit selection, close, and exact blur paths', () => {
+  test('combobox wires tested keyboard and one-shot Tab blur state', () => {
     const source = readSource('src/lib/components/FuzzyCombobox.svelte');
     const commit = source.slice(source.indexOf('async function commit('), source.indexOf('function onKeydown('));
     const keydown = source.slice(source.indexOf('function onKeydown('), source.indexOf('function onBlur('));
     const blur = source.slice(source.indexOf('function onBlur('), source.indexOf('// Keep the highlighted index'));
 
     expect(commit).toContain("if (opt.kind === 'entry')");
-    expect(commit).toContain('const id = await onAddNew(opt.label);');
-    expect(commit).toContain('selectedId = id;');
+    expect(commit).toContain('selectedId = result.id;');
     expect(commit).toContain('text = opt.label;');
     expect(commit.match(/onEdited\(\);/g)).toHaveLength(1);
     expect(commit.indexOf('open = false;')).toBeLessThan(commit.indexOf('onEdited();'));
-    expect(keydown.match(/open = false;/g)).toHaveLength(2);
-    expect(blur).toContain('if (selectedId === null && result.exactId !== null)');
-    expect(blur).toContain('selectedId = result.exactId;');
-    expect(blur).toContain('if (m) text = m.name;');
-    expect(blur).toContain('open = false;');
+    expect(keydown).toContain('comboboxKeyAction({ open, highlight, optionCount: options.length, pending }, e.key)');
+    expect(keydown).toContain('suppressBlurCommit = action.suppressBlurCommit;');
+    expect(keydown).toContain('if (action.commitIndex !== null) void commit(options[action.commitIndex]);');
+    expect(blur).toContain('comboboxBlurState({');
+    expect(blur).toContain('suppressCommit: suppressBlurCommit');
+    expect(blur).toContain('suppressBlurCommit = next.suppressBlurCommit;');
+    expect(source).toContain('tabindex="-1"');
+  });
+
+  test('combobox quick-add is guarded, recoverable, and politely linked', () => {
+    const source = readSource('src/lib/components/FuzzyCombobox.svelte');
+    const commit = source.slice(source.indexOf('async function commit('), source.indexOf('function onKeydown('));
+
+    expect(commit).toContain('if (pending) return;');
+    expect(commit).toContain('pending = true;');
+    expect(commit).toContain('await runComboboxAddAction({');
+    expect(commit).toContain("if (result.status === 'failed')");
+    expect(commit).toContain('open = true;');
+    expect(commit).toContain('await tick();');
+    expect(commit).toContain('inputEl?.focus();');
+    expect(source).toContain('bind:this={inputEl}');
+    expect(source).toContain('aria-busy={pending}');
+    expect(source).toContain('aria-describedby={describedBy}');
+    expect(source).toContain('disabled={pending}');
+    expect(source).toContain('id={`${inputId}-status`}');
+    expect(source).toContain('role="status" aria-live="polite"');
   });
 
   test('date picker exposes stable focus and validation hooks', () => {
@@ -70,6 +90,41 @@ describe('invoice approval component contracts', () => {
     expect(source).toContain("${ariaLabel}${required ? ' (required)' : ''}");
     expect(source).toContain('aria-invalid={invalid}');
     expect(source).toContain('aria-describedby={errorId || undefined}');
+  });
+
+  test('date picker implements dialog focus, date names, and grid keyboard integration', () => {
+    const source = readSource('src/lib/components/DatePicker.svelte');
+    for (const contract of [
+      "import { tick } from 'svelte';",
+      'initialCalendarDate(value)',
+      'moveCalendarDateByKey(date, event.key)',
+      'calendarDateLabel(dateForDay(day))',
+      'async function focusDay()',
+      "root?.querySelector<HTMLButtonElement>('.day')",
+      'async function closeAndRestoreFocus()',
+      'fieldEl?.focus();',
+      'function onDialogKeydown(event: KeyboardEvent)',
+      "dialogEl.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, [tabindex]:not([tabindex=\"-1\"])')",
+      'role="dialog" aria-modal="true"',
+      'bind:this={dialogEl} onkeydown={onDialogKeydown}',
+      'role="grid"',
+      'role="row"',
+      'role="gridcell"',
+      'aria-selected={isSel(day)}',
+      'tabindex={isFocused(day) ? 0 : -1}',
+      'onkeydown={(event) => onDayKeydown(event, dateForDay(day))}',
+    ]) expect(source).toContain(contract);
+
+    const pick = source.slice(source.indexOf('async function pick('), source.indexOf('// WebKitGTK'));
+    expect(pick).toContain('open = false;');
+    expect(pick).toContain('onChange();');
+    expect(pick).toContain('await tick();');
+    expect(pick).toContain('fieldEl?.focus();');
+    expect(source).toContain("if (event.key === 'Escape' && open)");
+    expect(source).toContain('void closeAndRestoreFocus();');
+    expect(source).toContain('.days { display: flex; flex-direction: column; gap: 2px; }');
+    expect(source).toContain('.week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }');
+    expect(source).not.toContain('.week { display: contents; }');
   });
 
   test('invoice sections render responsive row-local mileage approval disclosures', () => {
