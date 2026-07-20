@@ -23,8 +23,8 @@ async function tableNames(db: Awaited<ReturnType<typeof createSqlJsDb>>): Promis
   return rows.map((r) => r.name);
 }
 
-async function migrateThroughVersion3(db: Awaited<ReturnType<typeof createSqlJsDb>>) {
-  for (const migration of MIGRATIONS.filter((entry) => entry.version <= 3)) {
+async function migrateThroughVersion4(db: Awaited<ReturnType<typeof createSqlJsDb>>) {
+  for (const migration of MIGRATIONS.filter((entry) => entry.version <= 4)) {
     for (const statement of migration.statements) await db.execute(statement);
     await db.execute(`PRAGMA user_version = ${migration.version}`);
   }
@@ -77,11 +77,18 @@ describe('runMigrations', () => {
     ]));
   });
 
-  test('migrates a version-3 database without changing existing invoice data', async () => {
+  test('migrates a version-4 database without changing existing invoice or line-item data', async () => {
     const db = await createSqlJsDb();
-    await migrateThroughVersion3(db);
+    await migrateThroughVersion4(db);
     await db.execute(
-      "INSERT INTO invoices (year, seq, status, issue_date) VALUES (2026, 9, 'finalized', '2026-07-01')",
+      "INSERT INTO invoices (id, year, seq, status, issue_date) VALUES (1, 2026, 9, 'finalized', '2026-07-01')",
+    );
+    await db.execute(
+      `INSERT INTO line_items
+         (id, invoice_id, type, position, inspection_number, client_name, location,
+          date, vin8, mileage_cents, fee_cents)
+       VALUES (1, 1, 'completed', 3, '87654321', 'Existing Client', 'Existing Location',
+               '2026-06-30', 'ABCD1234', 1250, 3800)`,
     );
 
     await expect(runMigrations(db)).resolves.toBe(5);
@@ -89,9 +96,18 @@ describe('runMigrations', () => {
     expect(await db.select('SELECT year, seq, issue_date FROM invoices')).toEqual([
       { year: 2026, seq: 9, issue_date: '2026-07-01' },
     ]);
-    expect(await tableNames(db)).toEqual(expect.arrayContaining([
-      'expense_year_counters', 'expense_reports', 'expense_items',
-    ]));
+    expect(await db.select(`SELECT invoice_id, position, inspection_number, mileage_cents,
+      fee_cents, mileage_approver_id, mileage_approver_name, mileage_approval_date
+      FROM line_items`)).toEqual([{
+      invoice_id: 1,
+      position: 3,
+      inspection_number: '87654321',
+      mileage_cents: 1250,
+      fee_cents: 3800,
+      mileage_approver_id: null,
+      mileage_approver_name: '',
+      mileage_approval_date: '',
+    }]);
   });
 
   test('backfills client name keys and enforces case-insensitive uniqueness', async () => {

@@ -92,6 +92,40 @@ describe('validateBackup', () => {
     expect(check.reason).toMatch(/missing expected data/i);
   });
 
+  test('rejects a v5 backup with a partial approver name-key index', async () => {
+    const db = await goodDb();
+    await db.execute('DROP INDEX idx_approvers_name_key');
+    await db.execute(
+      'CREATE UNIQUE INDEX idx_approvers_name_key ON approvers(name_key) WHERE active = 1',
+    );
+
+    const check = await validateBackup(db);
+
+    expect(check.ok).toBe(false);
+    expect(check.reason).toMatch(/missing expected data/i);
+  });
+
+  test('rejects a v5 backup where the approver reference is one leg of a composite foreign key', async () => {
+    const db = await goodDb();
+    await db.execute('PRAGMA foreign_keys = OFF');
+    await db.execute('DROP TABLE line_items');
+    await db.execute('CREATE UNIQUE INDEX idx_approvers_composite_fk ON approvers(id, name_key)');
+    await db.execute(`CREATE TABLE line_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mileage_approver_id INTEGER,
+      mileage_approver_name TEXT NOT NULL DEFAULT '',
+      mileage_approval_date TEXT NOT NULL DEFAULT '',
+      FOREIGN KEY (mileage_approver_id, mileage_approver_name)
+        REFERENCES approvers(id, name_key)
+    )`);
+    await db.execute('PRAGMA foreign_keys = ON');
+
+    const check = await validateBackup(db);
+
+    expect(check.ok).toBe(false);
+    expect(check.reason).toMatch(/missing expected data/i);
+  });
+
   test('rejects a database missing our tables (some other app)', async () => {
     const db = await createSqlJsDb();
     await db.execute('CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)');

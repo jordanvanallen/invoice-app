@@ -98,9 +98,18 @@ mod tests {
 
     async fn create_v4_line_items(pool: &SqlitePool) {
         sqlx::query(
+            "CREATE TABLE invoices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                year INTEGER NOT NULL
+            )",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
             "CREATE TABLE line_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                invoice_id INTEGER NOT NULL,
+                invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
                 type TEXT NOT NULL CHECK (type IN ('completed','noshow')),
                 position INTEGER NOT NULL DEFAULT 0,
                 inspection_number TEXT NOT NULL DEFAULT '',
@@ -113,6 +122,21 @@ mod tests {
                 mileage_cents INTEGER NOT NULL DEFAULT 0,
                 fee_cents INTEGER NOT NULL DEFAULT 0
             )",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO invoices (id, year) VALUES (1, 2026)")
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO line_items
+                (id, invoice_id, type, position, inspection_number, client_name, location,
+                 date, vin8, mileage_cents, fee_cents)
+             VALUES
+                (1, 1, 'completed', 3, '87654321', 'Existing Client', 'Existing Location',
+                 '2026-06-30', 'ABCD1234', 1250, 3800)",
         )
         .execute(pool)
         .await
@@ -275,6 +299,29 @@ mod tests {
             "mileage_approver_name".into(),
             "mileage_approval_date".into(),
         ]));
+
+        let existing_line: (i64, i64, String, i64, i64, Option<i64>, String, String) =
+            sqlx::query_as(
+                "SELECT invoice_id, position, inspection_number, mileage_cents, fee_cents,
+                        mileage_approver_id, mileage_approver_name, mileage_approval_date
+                   FROM line_items WHERE id = 1",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            existing_line,
+            (
+                1,
+                3,
+                "87654321".into(),
+                1250,
+                3800,
+                None,
+                "".into(),
+                "".into()
+            )
+        );
 
         let foreign_keys = sqlx::query("PRAGMA foreign_key_list(line_items)")
             .fetch_all(&pool)
