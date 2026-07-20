@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick, type Component } from 'svelte';
   import { onNavigate } from '$app/navigation';
   import InvoiceSection from '$lib/components/InvoiceSection.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
@@ -7,9 +7,9 @@
   import BigButton from '$lib/components/BigButton.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import DatePicker from '$lib/components/DatePicker.svelte';
-  import InvoiceView from '$lib/components/InvoiceView.svelte';
+  import InvoiceViewBase from '$lib/components/InvoiceView.svelte';
   import { loadSettings } from '$lib/stores/settings';
-  import { loadClients, loadLocations, addClient as addClientDb, addLocation as addLocationDb } from '$lib/stores/catalog';
+  import { loadClients, loadLocations, loadApprovers, addClient as addClientDb, addLocation as addLocationDb, addApprover as addApproverDb } from '$lib/stores/catalog';
   import { getDb } from '$lib/db';
   import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, latestDraftId, finalizeInvoice, peekNextSeq, loadBilledHistory, type BilledHistory } from '$lib/db/invoice-repo';
   import { takenSeqs } from '$lib/db/numbering-repo';
@@ -22,7 +22,7 @@
   import { saveInvoicePdf } from '$lib/pdf/generate';
   import { showSaveToast } from '$lib/stores/toast';
   import { backupNow } from '$lib/stores/backup';
-  import { missingFinalizeFields, findDuplicates } from '$lib/validation';
+  import { invoiceFinalizeBlockers, findDuplicates } from '$lib/validation';
   import { formatDollars } from '$lib/money';
   import { bpToPercentInput } from '$lib/ui/format';
   import {
@@ -42,10 +42,14 @@
   import type { CatalogEntry } from '$lib/db/catalog-repo';
   import { toEditorRow, type EditorRow } from '$lib/ui/editorRow';
 
+  // Task 8 consumes this route-level preview flag and adds it to InvoiceView.
+  const InvoiceView = InvoiceViewBase as Component<{ snap: FinalizedSnapshot; preview?: boolean }>;
+
   let loaded = $state(false);
   let settings = $state<Settings | null>(null);
   let clients = $state<CatalogEntry[]>([]);
   let locations = $state<CatalogEntry[]>([]);
+  let approvers = $state<CatalogEntry[]>([]);
   // VINs / inspection #s already on finalized invoices — for the double-billing guard.
   let billed = $state<BilledHistory>({ vins: {}, inspections: {} });
 
@@ -117,6 +121,7 @@
     settings = await loadSettings();
     clients = await loadClients();
     locations = await loadLocations();
+    approvers = await loadApprovers();
 
     const def = defaultInvoicePeriod();
     todayIso = def.issueDate;
@@ -260,14 +265,31 @@
   }
 
   const allLines = $derived([...completed, ...noshow]);
-  const blockerCount = $derived(allLines.filter((l) => missingFinalizeFields(l).length > 0).length);
-  const canFinalize = $derived(allLines.length > 0 && blockerCount === 0 && seqState.status === 'ready');
+  const finalizeBlockers = $derived(invoiceFinalizeBlockers(buildDraft()));
+  const blockedLineIndices = $derived(new Set(
+    finalizeBlockers.flatMap((blocker) => blocker.lineIndex === null ? [] : [blocker.lineIndex]),
+  ));
+  const blockerCount = $derived(blockedLineIndices.size);
+  const canFinalize = $derived(finalizeBlockers.length === 0 && seqState.status === 'ready');
 
-  function jumpToBlocker() {
-    const blocker = allLines.find((l) => missingFinalizeFields(l).length > 0);
-    if (!blocker) return;
-    const el = document.getElementById(`row-${blocker.uid}`);
+  async function jumpToBlocker() {
+    const blocker = finalizeBlockers.find((candidate) => candidate.lineIndex !== null);
+    if (!blocker || blocker.lineIndex === null) return;
+    const row = allLines[blocker.lineIndex];
+    if (!row) return;
+    const el = document.getElementById(`row-${row.uid}`);
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    if (blocker.field === 'mileageApprover' || blocker.field === 'mileageApprovalDate') {
+      row.approvalCollapsed = false;
+      await tick();
+      const target = blocker.field === 'mileageApprover'
+        ? document.getElementById(`mileage-approver-${row.uid}`)
+        : document.getElementById(`mileage-approval-date-${row.uid}`);
+      target?.focus();
+      return;
+    }
+
     (el?.querySelector('input') as HTMLInputElement | null)?.focus();
   }
 
@@ -321,6 +343,11 @@
   async function addLocationRefresh(name: string): Promise<number> {
     const id = await addLocationDb(name);
     locations = await loadLocations();
+    return id;
+  }
+  async function addApprover(name: string): Promise<number> {
+    const id = await addApproverDb(name);
+    approvers = await loadApprovers();
     return id;
   }
 </script>
@@ -395,7 +422,7 @@
     <InvoiceSection
       title="Completed Inspections · {formatDollars(settings.defaultCompletedFeeCents)} each"
       tone="completed" addLabel="Add inspection"
-      bind:rows={completed} {clients} {locations}
+      bind:rows={completed} {clients} {locations} {approvers} {addApprover}
       addClient={addClientRefresh} addLocation={addLocationRefresh}
       defaultFeeCents={settings.defaultCompletedFeeCents} dateDefault={todayIso}
       {periodStart} {periodEnd} {dupInspections} {dupVins}
@@ -404,7 +431,7 @@
     <InvoiceSection
       title="No-Shows · {formatDollars(settings.defaultNoshowFeeCents)} each"
       tone="noshow" addLabel="Add no-show"
-      bind:rows={noshow} {clients} {locations}
+      bind:rows={noshow} {clients} {locations} {approvers} {addApprover}
       addClient={addClientRefresh} addLocation={addLocationRefresh}
       defaultFeeCents={settings.defaultNoshowFeeCents} dateDefault={todayIso}
       {periodStart} {periodEnd} {dupInspections} {dupVins}
@@ -441,7 +468,7 @@
         <button class="preview-close" onclick={() => (showPreview = false)}>Close preview</button>
       </div>
       <div class="preview-body">
-        <InvoiceView snap={previewSnap} />
+        <InvoiceView snap={previewSnap} preview />
       </div>
     </div>
   {/if}

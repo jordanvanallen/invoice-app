@@ -71,4 +71,68 @@ describe('invoice approval component contracts', () => {
     expect(source).toContain('aria-invalid={invalid}');
     expect(source).toContain('aria-describedby={errorId || undefined}');
   });
+
+  test('invoice sections render responsive row-local mileage approval disclosures', () => {
+    const section = readSource('src/lib/components/InvoiceSection.svelte');
+    expect(section).toContain('approvers: CatalogEntry[]');
+    expect(section).toContain('addApprover: (name: string) => Promise<number>');
+    expect(section).toContain('id="mileage-approval-{row.uid}"');
+    expect(section).toContain('aria-expanded={!row.approvalCollapsed}');
+    expect(section).toContain('aria-controls="mileage-approval-{row.uid}"');
+    expect(section).toContain('inputId={`mileage-approver-${row.uid}`}');
+    expect(section).toContain('fieldId={`mileage-approval-date-${row.uid}`}');
+    expect(section).toContain('grid-column: 1 / -1');
+    expect(section).toContain('container-type: inline-size');
+    expect(section).toContain('overflow: visible');
+    expect(section).toContain('.card:focus-within { position: relative; z-index: 30; }');
+  });
+
+  test('invoice sections preserve deterministic mileage disclosure transitions', () => {
+    const section = readSource('src/lib/components/InvoiceSection.svelte');
+    const mileageHandler = section.slice(
+      section.indexOf('function onMileage('),
+      section.indexOf('function blurFee('),
+    );
+
+    expect(mileageHandler).toContain('const priorCents = rows[i].mileageCents;');
+    expect(mileageHandler).toContain('priorCents <= 0 && row.mileageCents > 0');
+    expect(mileageHandler).toContain('row.approvalCollapsed = false;');
+    expect(mileageHandler).not.toContain('.focus(');
+    expect(section).toContain('hasCompleteMileageApproval(row)');
+    expect(section).toContain('mileageApprovalText(row)');
+    expect(section).toContain('const approvalExpanded = !approvalComplete || !row.approvalCollapsed');
+    expect(section).toContain('{#if approvalComplete}');
+    expect(section).toContain('<div class="approval-panel" id="mileage-approval-{row.uid}">');
+    expect(section).toContain('{#if approvalExpanded}');
+    expect(section).toContain('onEdited={() => (row.approvalCollapsed = false)}');
+    expect(section).toContain('onChange={() => (row.approvalCollapsed = false)}');
+  });
+
+  test('invoice route wires catalogs, blockers, focus, and preview through both sections', () => {
+    const route = readSource('src/routes/+page.svelte');
+    expect(route.match(/<InvoiceSection/g)).toHaveLength(2);
+    expect(route).toContain('{approvers} {addApprover}');
+    expect(route).toContain('invoiceFinalizeBlockers(buildDraft())');
+    expect(route).toContain('mileage-approver-${row.uid}');
+    expect(route).toContain('mileage-approval-date-${row.uid}');
+    expect(route).toContain('<InvoiceView snap={previewSnap} preview />');
+  });
+
+  test('invoice route derives row counts and focus targets from shared blockers', () => {
+    const route = readSource('src/routes/+page.svelte');
+    const jumpHandler = route.slice(
+      route.indexOf('async function jumpToBlocker()'),
+      route.indexOf('async function doFinalize()'),
+    );
+
+    expect(route).toContain('const finalizeBlockers = $derived(invoiceFinalizeBlockers(buildDraft()));');
+    expect(route).toContain('const blockedLineIndices = $derived(new Set(');
+    expect(route).toContain('const blockerCount = $derived(blockedLineIndices.size);');
+    expect(route).toContain("const canFinalize = $derived(finalizeBlockers.length === 0 && seqState.status === 'ready');");
+    expect(jumpHandler).toContain('row.approvalCollapsed = false;');
+    expect(jumpHandler).toContain('await tick();');
+    expect(jumpHandler).toContain('document.getElementById(`mileage-approver-${row.uid}`)');
+    expect(jumpHandler).toContain('document.getElementById(`mileage-approval-date-${row.uid}`)');
+    expect(jumpHandler).toContain("el?.querySelector('input')");
+  });
 });
