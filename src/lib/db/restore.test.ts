@@ -146,6 +146,18 @@ describe('validateBackup', () => {
     expect(check.reason).toMatch(/missing expected data/i);
   });
 
+  test('rejects a backup claiming v5 when it already contains the v6 revision column', async () => {
+    const db = await version5Db();
+    await db.execute(
+      'ALTER TABLE invoices ADD COLUMN draft_revision INTEGER NOT NULL DEFAULT 0',
+    );
+
+    const check = await validateBackup(db);
+
+    expect(check.ok).toBe(false);
+    expect(check.reason).toMatch(/missing expected data/i);
+  });
+
   test('rejects v6 when the revision column has the wrong default', async () => {
     const db = await version5Db();
     await db.execute(

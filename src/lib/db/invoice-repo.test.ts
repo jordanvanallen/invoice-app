@@ -219,6 +219,113 @@ describe('finalize + reprint', () => {
     expect(row.total_cents).toBe(4294);
   });
 
+  test('retries automatic allocation when another automatic finalization wins the first number', async () => {
+    const db = await freshDb();
+    const firstId = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    const secondId = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-21',
+      periodStart: '2026-07-14', periodEnd: '2026-07-20',
+    });
+    await saveDraft(db, firstId, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line({ inspectionNumber: '10000001', vin8: 'FIRST001' })],
+    });
+    await saveDraft(db, secondId, {
+      year: 2026, issueDate: '2026-07-21',
+      periodStart: '2026-07-14', periodEnd: '2026-07-20',
+      lines: [line({ inspectionNumber: '10000002', vin8: 'SECOND02' })],
+    });
+    let competingFinalized = false;
+    const racingDb: Db = {
+      execute: (sql, params) => db.execute(sql, params),
+      select: db.select.bind(db),
+      executeTransaction: async (statements) => {
+        if (!competingFinalized && statements.some((statement) => statement.sql.includes("status = 'finalized'"))) {
+          competingFinalized = true;
+          await finalizeInvoice(db, secondId);
+        }
+        return executeStatementsAtomically(db, statements);
+      },
+    };
+
+    const firstSnapshot = await finalizeInvoice(racingDb, firstId);
+    const competingSnapshot = await reprintSnapshot(db, secondId);
+
+    expect(competingFinalized).toBe(true);
+    expect(competingSnapshot.invoiceNumber).toBe('1-2026');
+    expect(firstSnapshot.invoiceNumber).toBe('2-2026');
+    expect(await reprintSnapshot(db, firstId)).toEqual(firstSnapshot);
+    expect(await reprintSnapshot(db, secondId)).toEqual(competingSnapshot);
+    expect(await db.select(
+      'SELECT id, seq, status FROM invoices WHERE id IN (?, ?) ORDER BY seq',
+      [firstId, secondId],
+    )).toEqual([
+      { id: secondId, seq: 1, status: 'finalized' },
+      { id: firstId, seq: 2, status: 'finalized' },
+    ]);
+    expect(await db.select('SELECT year, last_seq FROM year_counters'))
+      .toEqual([{ year: 2026, last_seq: 2 }]);
+  });
+
+  test('retries automatic allocation above a concurrently finalized higher manual number', async () => {
+    const db = await freshDb();
+    const automaticId = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    const manualId = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-21',
+      periodStart: '2026-07-14', periodEnd: '2026-07-20',
+    });
+    const automaticDraft = {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line({ inspectionNumber: '20000001', vin8: 'AUTOM001' })],
+    };
+    const manualDraft = {
+      year: 2026, issueDate: '2026-07-21',
+      periodStart: '2026-07-14', periodEnd: '2026-07-20',
+      lines: [line({ inspectionNumber: '20000002', vin8: 'MANUAL02' })],
+    };
+    await saveDraft(db, automaticId, automaticDraft);
+    await saveDraft(db, manualId, manualDraft);
+    let manualFinalized = false;
+    const racingDb: Db = {
+      execute: (sql, params) => db.execute(sql, params),
+      select: db.select.bind(db),
+      executeTransaction: async (statements) => {
+        if (!manualFinalized && statements.some((statement) => statement.sql.includes("status = 'finalized'"))) {
+          manualFinalized = true;
+          await saveDraft(db, manualId, { ...manualDraft, seq: 9 });
+          await finalizeInvoice(db, manualId);
+        }
+        return executeStatementsAtomically(db, statements);
+      },
+    };
+
+    const automaticSnapshot = await finalizeInvoice(racingDb, automaticId);
+    const manualSnapshot = await reprintSnapshot(db, manualId);
+
+    expect(manualFinalized).toBe(true);
+    expect(manualSnapshot.invoiceNumber).toBe('9-2026');
+    expect(automaticSnapshot.invoiceNumber).toBe('10-2026');
+    expect(await reprintSnapshot(db, automaticId)).toEqual(automaticSnapshot);
+    expect(await reprintSnapshot(db, manualId)).toEqual(manualSnapshot);
+    expect(await db.select(
+      'SELECT id, seq, status FROM invoices WHERE id IN (?, ?) ORDER BY seq',
+      [automaticId, manualId],
+    )).toEqual([
+      { id: manualId, seq: 9, status: 'finalized' },
+      { id: automaticId, seq: 10, status: 'finalized' },
+    ]);
+    expect(await db.select('SELECT year, last_seq FROM year_counters'))
+      .toEqual([{ year: 2026, last_seq: 10 }]);
+  });
+
   test.each([
     { sequenceKind: 'automatic', seq: null },
     { sequenceKind: 'manual', seq: 9 },
@@ -251,7 +358,7 @@ describe('finalize + reprint', () => {
     }]);
   });
 
-  test('rolls back counter, status, timestamp, totals, and snapshot when the conditional update fails', async () => {
+  test('retries a competing sequence write and leaves no partial first attempt', async () => {
     const db = await freshDb();
     const id = await createDraft(db, {
       year: 2026, issueDate: '2026-07-20',
@@ -267,7 +374,7 @@ describe('finalize + reprint', () => {
       supportsSqlTransactions: true,
       select: async <T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> => {
         const rows = await db.select<T>(sql, params);
-        if (!raceInjected && sql.includes('SELECT MAX(seq) AS max_seq FROM invoices')) {
+        if (!raceInjected && sql.includes('(SELECT MAX(seq) FROM invoices')) {
           raceInjected = true;
           await db.execute(
             `INSERT INTO invoices
@@ -280,8 +387,52 @@ describe('finalize + reprint', () => {
       execute: (sql, params) => db.execute(sql, params),
     };
 
-    await expect(finalizeInvoice(failingDb, id)).rejects.toThrow(/expected 1 row.*affected 0/i);
+    const snapshot = await finalizeInvoice(failingDb, id);
 
+    expect(raceInjected).toBe(true);
+    expect(snapshot.invoiceNumber).toBe('2-2026');
+    expect(await reprintSnapshot(db, id)).toEqual(snapshot);
+    expect(await db.select('SELECT * FROM year_counters'))
+      .toEqual([{ year: 2026, last_seq: 2 }]);
+    expect(await db.select(
+      'SELECT seq, status, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json FROM invoices WHERE id = ?',
+      [id],
+    )).toEqual([{
+      seq: 2, status: 'finalized', finalized_at: '2026-07-20', subtotal_cents: 3800,
+      tax_cents: 494, total_cents: 4294, snapshot_json: JSON.stringify(snapshot),
+    }]);
+  });
+
+  test('does not retry an arbitrary finalization SQL error and rolls back the entire batch', async () => {
+    const db = await freshDb();
+    const id = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    await saveDraft(db, id, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line()],
+    });
+    await db.execute(`CREATE TRIGGER fail_invoice_finalize
+      BEFORE UPDATE ON invoices
+      WHEN NEW.status = 'finalized'
+      BEGIN
+        SELECT RAISE(FAIL, 'injected finalization failure');
+      END`);
+    let batches = 0;
+    const failingDb: Db = {
+      execute: (sql, params) => db.execute(sql, params),
+      select: db.select.bind(db),
+      executeTransaction: async (statements) => {
+        batches += 1;
+        return executeStatementsAtomically(db, statements);
+      },
+    };
+
+    await expect(finalizeInvoice(failingDb, id)).rejects.toThrow(/injected finalization failure/i);
+
+    expect(batches).toBe(1);
     expect(await db.select('SELECT * FROM year_counters')).toEqual([]);
     expect(await db.select(
       'SELECT status, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json FROM invoices WHERE id = ?',
@@ -290,6 +441,38 @@ describe('finalize + reprint', () => {
       status: 'draft', finalized_at: null, subtotal_cents: 0,
       tax_cents: 0, total_cents: 0, snapshot_json: null,
     }]);
+  });
+
+  test('bounds repeated automatic reservation conflicts without persisting partial state', async () => {
+    const db = await freshDb();
+    const id = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    await saveDraft(db, id, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line()],
+    });
+    let attempts = 0;
+    const conflictingDb: Db = {
+      execute: (sql, params) => db.execute(sql, params),
+      select: db.select.bind(db),
+      executeTransaction: async () => {
+        attempts += 1;
+        throw new Error('Expected 1 row(s) affected; affected 0.');
+      },
+    };
+
+    await expect(finalizeInvoice(conflictingDb, id)).rejects.toThrow(
+      /expected 1 row.*affected 0/i,
+    );
+
+    expect(attempts).toBe(3);
+    expect(await db.select('SELECT * FROM year_counters')).toEqual([]);
+    expect(await db.select(
+      'SELECT status, finalized_at, snapshot_json FROM invoices WHERE id = ?', [id],
+    )).toEqual([{ status: 'draft', finalized_at: null, snapshot_json: null }]);
   });
 
   test('rejects a stale finalization when a concurrent save advances the draft revision', async () => {

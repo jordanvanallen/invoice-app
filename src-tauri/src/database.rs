@@ -373,6 +373,37 @@ mod tests {
                 .await
                 .is_err()
         );
+
+        let mut connection = pool.acquire().await.unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+        assert!(sqlx::query(
+            "INSERT INTO line_items (invoice_id, type, mileage_approver_id)
+                 VALUES (1, 'completed', 999)"
+        )
+        .execute(&mut *connection)
+        .await
+        .is_err());
+        sqlx::query("UPDATE line_items SET mileage_approver_id = 1 WHERE id = 1")
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+        assert!(sqlx::query("DELETE FROM approvers WHERE id = 1")
+            .execute(&mut *connection)
+            .await
+            .is_err());
+        sqlx::query("UPDATE line_items SET mileage_approver_id = NULL WHERE id = 1")
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+        let deleted = sqlx::query("DELETE FROM approvers WHERE id = 1")
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+        assert_eq!(deleted.rows_affected(), 1);
+
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
             .fetch_one(&pool)
             .await

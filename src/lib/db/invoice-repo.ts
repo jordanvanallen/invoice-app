@@ -1,4 +1,4 @@
-import type { Db } from './db';
+import type { Db, DbStatement } from './db';
 import { executeStatementsAtomically, runInTransaction } from './db';
 import type { DraftInvoice, LineItem, FinalizedSnapshot } from '../types';
 import { orderInvoiceLines } from '../lineOrder';
@@ -176,6 +176,51 @@ function validateSeqResult(seq: number, taken: number[]): void {
   if (!result.ok) throw new Error(result.message);
 }
 
+const MAX_AUTOMATIC_RESERVATION_ATTEMPTS = 3;
+
+interface AutomaticSequenceState {
+  last_seq: number | null;
+  max_seq: number | null;
+}
+
+async function readAutomaticSequenceState(
+  db: Db,
+  year: number,
+  invoiceId: number,
+): Promise<AutomaticSequenceState> {
+  const [state] = await db.select<AutomaticSequenceState>(
+    `SELECT
+       (SELECT last_seq FROM year_counters WHERE year = ?) AS last_seq,
+       (SELECT MAX(seq) FROM invoices
+         WHERE year = ? AND seq IS NOT NULL AND id != ?) AS max_seq`,
+    [year, year, invoiceId],
+  );
+  return state ?? { last_seq: null, max_seq: null };
+}
+
+function isAffectedRowConflict(error: unknown): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'string' ? error : '';
+  return /^Expected 1 row\(s\) affected; affected 0\.$/i.test(message);
+}
+
+async function remainsSameDraft(
+  db: Db,
+  invoiceId: number,
+  draftRevision: number,
+): Promise<boolean> {
+  try {
+    const [state] = await db.select<{ status: string; draft_revision: number }>(
+      'SELECT status, draft_revision FROM invoices WHERE id = ?',
+      [invoiceId],
+    );
+    return state?.status === 'draft' && state.draft_revision === draftRevision;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Finalize a draft: allocate its seq, freeze the full snapshot + totals, set
  * status. One transaction. Returns the snapshot.
@@ -187,41 +232,79 @@ export async function finalizeInvoice(db: Db, invoiceId: number): Promise<Finali
   if (blockers.length) throw new Error(blockers[0].message);
 
   const settings = await getSettings(db);
-  const seq = normalizedDraft.seq === null
-    ? await peekNextSeq(db, normalizedDraft.year, invoiceId)
-    : normalizedDraft.seq;
   if (normalizedDraft.seq !== null) {
-    validateSeqResult(seq, await takenSeqs(db, normalizedDraft.year, invoiceId));
+    validateSeqResult(
+      normalizedDraft.seq,
+      await takenSeqs(db, normalizedDraft.year, invoiceId),
+    );
   }
-  const snapshot = buildFinalizedSnapshot(normalizedDraft, settings, seq);
 
-  await executeStatementsAtomically(db, [
-    {
-      sql: `INSERT INTO year_counters (year, last_seq) VALUES (?, ?)
-            ON CONFLICT(year) DO UPDATE SET last_seq =
-              CASE WHEN last_seq < excluded.last_seq THEN excluded.last_seq ELSE last_seq END`,
-      params: [normalizedDraft.year, seq],
-    },
-    {
-      sql:
-      `UPDATE invoices SET
-              seq = ?, year = ?, status = 'finalized', finalized_at = ?,
-              subtotal_cents = ?, tax_cents = ?, total_cents = ?, snapshot_json = ?
-            WHERE id = ? AND status = 'draft' AND draft_revision = ?
-              AND NOT EXISTS (
-                SELECT 1 FROM invoices other
-                WHERE other.year = ? AND other.seq = ? AND other.id != ?
-              )`,
-      params: [
-        seq, normalizedDraft.year, snapshot.issueDate,
-        snapshot.totals.subtotalCents, snapshot.totals.taxCents, snapshot.totals.totalCents,
-        JSON.stringify(snapshot), invoiceId, draftRevision,
-        normalizedDraft.year, seq, invoiceId,
-      ],
-      expectedRowsAffected: 1,
-    },
-  ]);
-  return snapshot;
+  const automatic = normalizedDraft.seq === null;
+  const attemptLimit = automatic ? MAX_AUTOMATIC_RESERVATION_ATTEMPTS : 1;
+  for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
+    let seq: number;
+    let reservation: DbStatement;
+    if (normalizedDraft.seq === null) {
+      const state = await readAutomaticSequenceState(db, normalizedDraft.year, invoiceId);
+      seq = Math.max(state.last_seq ?? 0, state.max_seq ?? 0) + 1;
+      reservation = state.last_seq === null
+        ? {
+            sql: `INSERT INTO year_counters (year, last_seq)
+                  SELECT ?, ?
+                  WHERE NOT EXISTS (SELECT 1 FROM year_counters WHERE year = ?)`,
+            params: [normalizedDraft.year, seq, normalizedDraft.year],
+            expectedRowsAffected: 1,
+          }
+        : {
+            sql: `UPDATE year_counters SET last_seq = ?
+                  WHERE year = ? AND last_seq = ?`,
+            params: [seq, normalizedDraft.year, state.last_seq],
+            expectedRowsAffected: 1,
+          };
+    } else {
+      seq = normalizedDraft.seq;
+      reservation = {
+        sql: `INSERT INTO year_counters (year, last_seq) VALUES (?, ?)
+              ON CONFLICT(year) DO UPDATE SET last_seq =
+                CASE WHEN last_seq < excluded.last_seq THEN excluded.last_seq ELSE last_seq END`,
+        params: [normalizedDraft.year, seq],
+      };
+    }
+    const snapshot = buildFinalizedSnapshot(normalizedDraft, settings, seq);
+
+    try {
+      await executeStatementsAtomically(db, [
+        reservation,
+        {
+          sql:
+          `UPDATE invoices SET
+                  seq = ?, year = ?, status = 'finalized', finalized_at = ?,
+                  subtotal_cents = ?, tax_cents = ?, total_cents = ?, snapshot_json = ?
+                WHERE id = ? AND status = 'draft' AND draft_revision = ?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM invoices other
+                    WHERE other.year = ? AND other.seq = ? AND other.id != ?
+                  )`,
+          params: [
+            seq, normalizedDraft.year, snapshot.issueDate,
+            snapshot.totals.subtotalCents, snapshot.totals.taxCents, snapshot.totals.totalCents,
+            JSON.stringify(snapshot), invoiceId, draftRevision,
+            normalizedDraft.year, seq, invoiceId,
+          ],
+          expectedRowsAffected: 1,
+        },
+      ]);
+      return snapshot;
+    } catch (error) {
+      const canRetry = automatic
+        && attempt + 1 < attemptLimit
+        && isAffectedRowConflict(error)
+        && await remainsSameDraft(db, invoiceId, draftRevision);
+      if (!canRetry) throw error;
+    }
+  }
+
+  throw new Error('Automatic invoice sequence reservation attempts were exhausted.');
 }
 
 /** Read a finalized invoice's frozen snapshot. Throws if not finalized. */
