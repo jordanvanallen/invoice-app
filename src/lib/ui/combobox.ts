@@ -12,6 +12,54 @@ export interface ComboResult {
   exactId: number | null;
 }
 
+export interface ComboboxPopupStateInput {
+  inputId: string;
+  open: boolean;
+  optionCount: number;
+  highlight: number;
+}
+
+export interface ComboboxPopupState {
+  visible: boolean;
+  controlsId: string | undefined;
+  activeDescendantId: string | undefined;
+  activeIndex: number | null;
+}
+
+export interface ComboboxInputEditState {
+  text: string;
+  selectedId: null;
+  open: true;
+  highlight: 0;
+}
+
+/** Apply one raw-input transition completely before notifying its observer. */
+export function applyComboboxInputEdit(
+  text: string,
+  apply: (state: ComboboxInputEditState) => void,
+  onEdited: () => void,
+): void {
+  apply({ text, selectedId: null, open: true, highlight: 0 });
+  onEdited();
+}
+
+/** Keep the combobox's exposed ARIA state aligned with popup nodes in the DOM. */
+export function comboboxPopupState({
+  inputId,
+  open,
+  optionCount,
+  highlight,
+}: ComboboxPopupStateInput): ComboboxPopupState {
+  const visible = open && optionCount > 0;
+  const activeIndex = visible && highlight >= 0 && highlight < optionCount ? highlight : null;
+  return {
+    visible,
+    controlsId: visible ? `${inputId}-listbox` : undefined,
+    activeDescendantId: activeIndex === null ? undefined : `${inputId}-option-${activeIndex}`,
+    activeIndex,
+  };
+}
+
 /**
  * Compute combobox options for a query against a catalog (clients/locations).
  * - Empty query → all entries, no add-row.

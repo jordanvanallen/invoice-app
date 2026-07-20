@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { comboboxOptions, type ComboOption } from '$lib/ui/combobox';
+  import {
+    applyComboboxInputEdit,
+    comboboxOptions,
+    comboboxPopupState,
+    type ComboOption,
+  } from '$lib/ui/combobox';
 
   let {
     label,
@@ -34,13 +39,20 @@
 
   const result = $derived(comboboxOptions(entries, text));
   const options = $derived(result.options);
+  const popup = $derived(comboboxPopupState({ inputId, open, optionCount: options.length, highlight }));
   const unlinked = $derived(selectedId === null && text.trim() !== '');
 
-  function onInput() {
-    open = true;
-    selectedId = null; // unlinked until a row is committed
-    highlight = 0;
-    onEdited();
+  function onInput(event: Event) {
+    applyComboboxInputEdit(
+      (event.currentTarget as HTMLInputElement).value,
+      (next) => {
+        text = next.text;
+        selectedId = next.selectedId;
+        open = next.open;
+        highlight = next.highlight;
+      },
+      onEdited,
+    );
   }
 
   async function commit(opt: ComboOption) {
@@ -106,13 +118,13 @@
       autocomplete="off"
       role="combobox"
       aria-autocomplete="list"
-      aria-expanded={open}
-      aria-controls={`${inputId}-listbox`}
-      aria-activedescendant={open && options[highlight] ? `${inputId}-option-${highlight}` : undefined}
+      aria-expanded={popup.visible}
+      aria-controls={popup.controlsId}
+      aria-activedescendant={popup.activeDescendantId}
       aria-invalid={invalid}
       aria-describedby={error ? `${inputId}-error` : undefined}
       aria-required={required}
-      bind:value={text}
+      value={text}
       class:linked={selectedId !== null}
       class:warn={!!error || !!warning || unlinked}
       oninput={onInput}
@@ -121,15 +133,15 @@
       onblur={onBlur}
     />
     {#if unlinked}<span class="dot" title="Not in your list yet"></span>{/if}
-    {#if open && options.length}
+    {#if popup.visible}
       <ul id={`${inputId}-listbox`} class="menu" role="listbox">
         {#each options as opt, i}
-          <li>
+          <li role="presentation">
             <button
               id={`${inputId}-option-${i}`}
               type="button"
               role="option"
-              aria-selected={i === highlight}
+              aria-selected={popup.activeIndex === i}
               class:hi={i === highlight}
               onmousedown={(e) => e.preventDefault()}
               onclick={() => commit(opt)}
