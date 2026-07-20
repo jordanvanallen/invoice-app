@@ -3,6 +3,7 @@
   import { getDb } from '$lib/db';
   import { listEntries, addEntry, renameEntry, setActive, deleteEntryIfUnused, type CatalogTable, type CatalogEntry } from '$lib/db/catalog-repo';
   import BigButton from './BigButton.svelte';
+  import { runCatalogRename, runCatalogToggle, runCatalogDelete } from './catalogManagerActions';
 
   interface Props {
     table: CatalogTable;
@@ -20,7 +21,8 @@
   let newName = $state('');
   let note = $state('');
 
-  async function refresh() { entries = await listEntries(await getDb(), table); }
+  async function loadEntries() { return listEntries(await getDb(), table); }
+  async function refresh() { entries = await loadEntries(); }
   onMount(async () => { await refresh(); loaded = true; });
 
   async function add() {
@@ -39,29 +41,32 @@
     }
   }
   async function rename(id: number, name: string) {
-    if (!name.trim()) return;
-    try {
-      await renameEntry(await getDb(), table, id, name.trim());
-      note = '';
-      await refresh();
-    } catch (e) {
-      note = (e as Error).message;
-      await refresh();
-    }
+    const result = await runCatalogRename({
+      table, noun, entries, id, name,
+      rename: async (entryId, nextName) => renameEntry(await getDb(), table, entryId, nextName),
+      refresh: loadEntries,
+    });
+    entries = result.entries;
+    note = result.note;
   }
   async function toggle(e: CatalogEntry) {
-    await setActive(await getDb(), table, e.id, !e.active);
-    await refresh();
+    const result = await runCatalogToggle({
+      table, noun, entries, entry: e,
+      setActive: async (entryId, active) => setActive(await getDb(), table, entryId, active),
+      refresh: loadEntries,
+    });
+    entries = result.entries;
+    note = result.note;
   }
   async function del(e: CatalogEntry) {
-    const ok = await deleteEntryIfUnused(await getDb(), table, e.id);
-    if (!ok) {
-      await setActive(await getDb(), table, e.id, false);
-      note = `This ${noun} is used on past invoices, so "${e.name}" can't be deleted — it was deactivated and is now hidden from new rows.`;
-    } else {
-      note = `Deleted ${noun} "${e.name}".`;
-    }
-    await refresh();
+    const result = await runCatalogDelete({
+      table, noun, entries, entry: e,
+      remove: async (entryId) => deleteEntryIfUnused(await getDb(), table, entryId),
+      setActive: async (entryId, active) => setActive(await getDb(), table, entryId, active),
+      refresh: loadEntries,
+    });
+    entries = result.entries;
+    note = result.note;
   }
 </script>
 

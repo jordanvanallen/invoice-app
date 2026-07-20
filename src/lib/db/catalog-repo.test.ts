@@ -44,6 +44,20 @@ describe('catalog repo (clients/locations/approvers)', () => {
     ]);
   });
 
+  test('concurrent approver quick-adds reuse one canonical ID and display name', async () => {
+    const db = await freshDb();
+
+    const [canonicalId, duplicateId] = await Promise.all([
+      addEntry(db, 'approvers', 'Jordan Lee'),
+      addEntry(db, 'approvers', '  jordan lee  '),
+    ]);
+
+    expect(duplicateId).toBe(canonicalId);
+    expect(await listEntries(db, 'approvers')).toEqual([
+      { id: canonicalId, name: 'Jordan Lee', active: true },
+    ]);
+  });
+
   test('rename fixes a misspelling', async () => {
     const db = await freshDb();
     const id = await addEntry(db, 'clients', 'Globex Finance Grp');

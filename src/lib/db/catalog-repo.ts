@@ -34,18 +34,17 @@ export async function addEntry(db: Db, table: CatalogTable, name: string): Promi
 
   if (CATALOGS[table].normalized) {
     const key = nameKey(trimmed);
-    const [existing] = await db.select<{ id: number; active: number }>(
-      `SELECT id, active FROM ${table} WHERE name_key = ?`,
+    await db.execute(
+      `INSERT INTO ${table} (name, name_key) VALUES (?, ?)
+       ON CONFLICT(name_key) DO UPDATE SET active = 1`,
+      [trimmed, key],
+    );
+    const [entry] = await db.select<{ id: number }>(
+      `SELECT id FROM ${table} WHERE name_key = ?`,
       [key],
     );
-    if (existing) {
-      if (existing.active !== 1) {
-        await db.execute(`UPDATE ${table} SET active = 1 WHERE id = ?`, [existing.id]);
-      }
-      return existing.id;
-    }
-    const r = await db.execute(`INSERT INTO ${table} (name, name_key) VALUES (?, ?)`, [trimmed, key]);
-    return r.lastInsertId as number;
+    if (!entry) throw new Error(`Failed to add ${CATALOGS[table].noun}.`);
+    return entry.id;
   }
 
   const r = await db.execute(`INSERT INTO ${table} (name) VALUES (?)`, [trimmed]);

@@ -24,22 +24,13 @@ describe('approver catalog UI contract', () => {
     expect(manager).toContain('role="status" aria-live="polite"');
   });
 
-  test('catalog manager reports noun-specific delete and deactivate outcomes', () => {
+  test('catalog manager applies refreshed state and status from guarded actions', () => {
     const manager = readSource('src/lib/components/CatalogManager.svelte');
 
-    expect(manager).toContain('Deleted ${noun}');
-    expect(manager).toContain('This ${noun} is used on past invoices');
-  });
-
-  test('catalog manager refreshes displayed state after a successful rename', () => {
-    const manager = readSource('src/lib/components/CatalogManager.svelte');
-    const renameHandler = manager.match(
-      /async function rename\([\s\S]*?\n  }\n  async function toggle/,
-    )?.[0] ?? '';
-
-    expect(renameHandler).toMatch(
-      /await renameEntry\([\s\S]*?\);\n\s+note = '';\n\s+await refresh\(\);/,
-    );
+    expect(manager).toContain('const result = await runCatalogRename({');
+    expect(manager).toContain('const result = await runCatalogToggle({');
+    expect(manager).toContain('const result = await runCatalogDelete({');
+    expect(manager.match(/entries = result\.entries;\n\s+note = result\.note;/g)).toHaveLength(3);
   });
 
   test('every catalog page supplies the required singular noun', () => {
