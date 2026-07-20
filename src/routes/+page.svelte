@@ -82,7 +82,9 @@
         type: l.type, position: i, inspectionNumber: l.inspectionNumber,
         clientId: l.clientId, clientName: l.clientName, locationId: l.locationId,
         location: l.location, date: l.date, vin8: l.vin8,
-        mileageCents: l.mileageCents, feeCents: l.feeCents,
+        mileageCents: l.mileageCents, mileageApproverId: l.mileageApproverId,
+        mileageApproverName: l.mileageApproverName, mileageApprovalDate: l.mileageApprovalDate,
+        feeCents: l.feeCents,
       })),
     };
   }

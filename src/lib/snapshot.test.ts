@@ -24,7 +24,8 @@ function completed(): LineItem {
   return {
     type: 'completed', position: 0, inspectionNumber: '12345678', clientId: 1,
     clientName: 'Acme Lease Corp', locationId: 1, location: 'Maplewood',
-    date: '2026-05-21', vin8: 'XY12AB99', mileageCents: 0, feeCents: 3800,
+    date: '2026-05-21', vin8: 'XY12AB99', mileageCents: 0,
+    mileageApproverId: null, mileageApproverName: '', mileageApprovalDate: '', feeCents: 3800,
   };
 }
 function draft(): DraftInvoice {

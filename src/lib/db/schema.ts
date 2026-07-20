@@ -133,4 +133,19 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX idx_expense_items_report ON expense_items(expense_report_id, position)`,
     ],
   },
+  {
+    version: 5,
+    statements: [
+      `CREATE TABLE approvers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        name_key TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1
+      )`,
+      `CREATE UNIQUE INDEX idx_approvers_name_key ON approvers(name_key)`,
+      `ALTER TABLE line_items ADD COLUMN mileage_approver_id INTEGER REFERENCES approvers(id)`,
+      `ALTER TABLE line_items ADD COLUMN mileage_approver_name TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE line_items ADD COLUMN mileage_approval_date TEXT NOT NULL DEFAULT ''`,
+    ],
+  },
 ];

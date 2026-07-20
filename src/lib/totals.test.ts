@@ -6,7 +6,8 @@ function completed(feeCents: number, mileageCents = 0): LineItem {
   return {
     type: 'completed', position: 0, inspectionNumber: 'x', clientId: null,
     clientName: 'c', locationId: null, location: 'l', date: '2026-05-21',
-    vin8: 'AB123456', mileageCents, feeCents,
+    vin8: 'AB123456', mileageCents,
+    mileageApproverId: null, mileageApproverName: '', mileageApprovalDate: '', feeCents,
   };
 }
 function noshow(feeCents: number, mileageCents = 0): LineItem {

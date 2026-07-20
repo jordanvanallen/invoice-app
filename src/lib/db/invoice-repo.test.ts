@@ -30,7 +30,9 @@ function line(over: Partial<LineItem> = {}): LineItem {
   return {
     type: 'completed', position: 0, inspectionNumber: '12345678', clientId: null,
     clientName: 'Acme Lease Corp', locationId: null, location: 'Maplewood',
-    date: '2026-05-21', vin8: 'XY12AB99', mileageCents: 0, feeCents: 3800, ...over,
+    date: '2026-05-21', vin8: 'XY12AB99', mileageCents: 0,
+    mileageApproverId: null, mileageApproverName: '', mileageApprovalDate: '',
+    feeCents: 3800, ...over,
   };
 }
 
@@ -53,6 +55,13 @@ describe('invoice draft repo', () => {
     });
     const draft = await loadDraft(db, id);
     expect(draft.lines.map((l) => l.inspectionNumber)).toEqual(['A', 'B']);
+    expect(draft.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        mileageApproverId: null,
+        mileageApproverName: '',
+        mileageApprovalDate: '',
+      }),
+    ]));
   });
 
   test('saveDraft works on adapters that do not support raw transaction commands', async () => {

@@ -30,11 +30,18 @@ async function migrateThroughVersion3(db: Awaited<ReturnType<typeof createSqlJsD
   }
 }
 
+async function migrateThroughVersion2(db: Awaited<ReturnType<typeof createSqlJsDb>>) {
+  for (const migration of MIGRATIONS.filter((entry) => entry.version <= 2)) {
+    for (const statement of migration.statements) await db.execute(statement);
+    await db.execute(`PRAGMA user_version = ${migration.version}`);
+  }
+}
+
 describe('runMigrations', () => {
   test('creates all tables and sets user_version', async () => {
     const db = await createSqlJsDb();
     const version = await runMigrations(db);
-    expect(version).toBe(4);
+    expect(version).toBe(5);
     const names = await tableNames(db);
     for (const t of ['settings', 'clients', 'locations', 'year_counters', 'invoices', 'line_items']) {
       expect(names).toContain(t);
@@ -42,8 +49,9 @@ describe('runMigrations', () => {
     for (const t of ['expense_year_counters', 'expense_reports', 'expense_items']) {
       expect(names).toContain(t);
     }
+    expect(names).toContain('approvers');
     const uv = await db.select<{ user_version: number }>('PRAGMA user_version');
-    expect(uv[0].user_version).toBe(4);
+    expect(uv[0].user_version).toBe(5);
     const s = await db.select<{ id: number }>('SELECT id FROM settings');
     expect(s).toEqual([{ id: 1 }]);
     // v2 added the logo column
@@ -51,6 +59,22 @@ describe('runMigrations', () => {
     expect(cols.map((c) => c.name)).toContain('logo_data_url');
     const clientCols = await db.select<{ name: string }>("SELECT name FROM pragma_table_info('clients')");
     expect(clientCols.map((c) => c.name)).toContain('name_key');
+    const lineItemCols = await db.select<{ name: string }>(
+      "SELECT name FROM pragma_table_info('line_items')",
+    );
+    expect(lineItemCols.map((row) => row.name)).toEqual(expect.arrayContaining([
+      'mileage_approver_id', 'mileage_approver_name', 'mileage_approval_date',
+    ]));
+    const indexes = await db.select<{ name: string; unique: number }>('PRAGMA index_list(approvers)');
+    expect(indexes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'idx_approvers_name_key', unique: 1 }),
+    ]));
+    const fks = await db.select<{ table: string; from: string; to: string }>(
+      'PRAGMA foreign_key_list(line_items)',
+    );
+    expect(fks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ table: 'approvers', from: 'mileage_approver_id', to: 'id' }),
+    ]));
   });
 
   test('migrates a version-3 database without changing existing invoice data', async () => {
@@ -60,7 +84,7 @@ describe('runMigrations', () => {
       "INSERT INTO invoices (year, seq, status, issue_date) VALUES (2026, 9, 'finalized', '2026-07-01')",
     );
 
-    await expect(runMigrations(db)).resolves.toBe(4);
+    await expect(runMigrations(db)).resolves.toBe(5);
 
     expect(await db.select('SELECT year, seq, issue_date FROM invoices')).toEqual([
       { year: 2026, seq: 9, issue_date: '2026-07-01' },
@@ -72,14 +96,9 @@ describe('runMigrations', () => {
 
   test('backfills client name keys and enforces case-insensitive uniqueness', async () => {
     const db = await createSqlJsDb();
-    await db.execute(`CREATE TABLE clients (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      active INTEGER NOT NULL DEFAULT 1
-    )`);
+    await migrateThroughVersion2(db);
     await db.execute("INSERT INTO clients (name) VALUES ('Globex Finance Group')");
     await db.execute("INSERT INTO clients (name) VALUES ('globex finance group')");
-    await db.execute('PRAGMA user_version = 2');
 
     await runMigrations(db);
 
@@ -102,7 +121,7 @@ describe('runMigrations', () => {
 
   test('runs on adapters that do not support raw transaction commands', async () => {
     const db = withoutSqlTransactions(await createSqlJsDb());
-    await expect(runMigrations(db)).resolves.toBe(4);
+    await expect(runMigrations(db)).resolves.toBe(5);
     const s = await db.select<{ id: number }>('SELECT id FROM settings');
     expect(s).toEqual([{ id: 1 }]);
   });
@@ -137,6 +156,6 @@ describe('runMigrations', () => {
     await runMigrations(db);
 
     expect(batches).toBe(MIGRATIONS.length);
-    expect((await inner.select<{ user_version: number }>('PRAGMA user_version'))[0].user_version).toBe(4);
+    expect((await inner.select<{ user_version: number }>('PRAGMA user_version'))[0].user_version).toBe(5);
   });
 });

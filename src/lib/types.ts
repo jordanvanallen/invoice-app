@@ -22,6 +22,9 @@ export interface LineItem {
   vin8: string;
   /** Taxable billable add-on; 0 when none. Not used on no-show lines. */
   mileageCents: Cents;
+  mileageApproverId: number | null;
+  mileageApproverName: string;
+  mileageApprovalDate: string;
   /** Fee bound when the row is created; never a live lookup. */
   feeCents: Cents;
 }

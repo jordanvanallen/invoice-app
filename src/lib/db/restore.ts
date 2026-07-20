@@ -67,6 +67,42 @@ export async function validateBackup(db: Db): Promise<BackupCheck> {
   if (hasExpenseSchema && EXPENSE_TABLES.some((table) => !names.has(table))) {
     return { ok: false, reason: "This doesn't look like an Invoice Maker backup — it's missing expected data." };
   }
+  if (schemaVersion >= 5) {
+    const approverColumns = new Set((await db.select<{ name: string }>(
+      "SELECT name FROM pragma_table_info('approvers')",
+    )).map((row) => row.name));
+    const lineColumns = new Set((await db.select<{ name: string }>(
+      "SELECT name FROM pragma_table_info('line_items')",
+    )).map((row) => row.name));
+    const indexes = await db.select<{ name: string; unique: number }>('PRAGMA index_list(approvers)');
+    const indexColumns = await db.select<{ name: string }>('PRAGMA index_info(idx_approvers_name_key)');
+    const foreignKeys = await db.select<{ table: string; from: string; to: string }>(
+      'PRAGMA foreign_key_list(line_items)',
+    );
+    const foreignKeyErrors = await db.select('PRAGMA foreign_key_check');
+    const hasApproverColumns = ['id', 'name', 'name_key', 'active']
+      .every((column) => approverColumns.has(column));
+    const hasMileageColumns = [
+      'mileage_approver_id', 'mileage_approver_name', 'mileage_approval_date',
+    ].every((column) => lineColumns.has(column));
+    const hasUniqueNameKeyIndex = indexes.some(
+      (index) => index.name === 'idx_approvers_name_key' && index.unique === 1,
+    ) && indexColumns.length === 1 && indexColumns[0]?.name === 'name_key';
+    const hasApproverForeignKey = foreignKeys.some(
+      (foreignKey) => foreignKey.table === 'approvers'
+        && foreignKey.from === 'mileage_approver_id'
+        && foreignKey.to === 'id',
+    );
+    if (
+      !hasApproverColumns
+      || !hasMileageColumns
+      || !hasUniqueNameKeyIndex
+      || !hasApproverForeignKey
+      || foreignKeyErrors.length !== 0
+    ) {
+      return { ok: false, reason: "This doesn't look like an Invoice Maker backup — it's missing expected data." };
+    }
+  }
 
   // Content summary for the user to eyeball before committing.
   const set = await db.select<{ name: string }>('SELECT inspector_name AS name FROM settings WHERE id = 1');

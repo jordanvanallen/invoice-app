@@ -36,6 +36,9 @@ interface LineRow {
   date: string;
   vin8: string;
   mileage_cents: number;
+  mileage_approver_id: number | null;
+  mileage_approver_name: string;
+  mileage_approval_date: string;
   fee_cents: number;
 }
 
@@ -48,7 +51,8 @@ export async function loadDraft(db: Db, invoiceId: number): Promise<DraftInvoice
     `SELECT li.type, li.position, li.inspection_number,
             li.client_id, li.client_name AS stored_client_name, c.name AS live_client_name,
             li.location_id, li.location AS stored_location, loc.name AS live_location,
-            li.date, li.vin8, li.mileage_cents, li.fee_cents
+            li.date, li.vin8, li.mileage_cents, li.mileage_approver_id,
+            li.mileage_approver_name, li.mileage_approval_date, li.fee_cents
        FROM line_items li
        LEFT JOIN clients c ON c.id = li.client_id
        LEFT JOIN locations loc ON loc.id = li.location_id
@@ -68,6 +72,9 @@ export async function loadDraft(db: Db, invoiceId: number): Promise<DraftInvoice
     date: r.date,
     vin8: r.vin8,
     mileageCents: r.mileage_cents,
+    mileageApproverId: r.mileage_approver_id ?? null,
+    mileageApproverName: r.mileage_approver_name ?? '',
+    mileageApprovalDate: r.mileage_approval_date ?? '',
     feeCents: r.fee_cents,
   }));
 

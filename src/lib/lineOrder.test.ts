@@ -19,6 +19,9 @@ function line(
     date,
     vin8: '12345678',
     mileageCents: 0,
+    mileageApproverId: null,
+    mileageApproverName: '',
+    mileageApprovalDate: '',
     feeCents: 3800,
   };
 }

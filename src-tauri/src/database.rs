@@ -94,7 +94,57 @@ pub async fn execute_sqlite_transaction(
 mod tests {
     use super::{execute_statements, SqlStatement};
     use serde_json::json;
-    use sqlx::SqlitePool;
+    use sqlx::{Row, SqlitePool};
+
+    async fn create_v4_line_items(pool: &SqlitePool) {
+        sqlx::query(
+            "CREATE TABLE line_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_id INTEGER NOT NULL,
+                type TEXT NOT NULL CHECK (type IN ('completed','noshow')),
+                position INTEGER NOT NULL DEFAULT 0,
+                inspection_number TEXT NOT NULL DEFAULT '',
+                client_id INTEGER,
+                client_name TEXT NOT NULL DEFAULT '',
+                location_id INTEGER,
+                location TEXT NOT NULL DEFAULT '',
+                date TEXT NOT NULL DEFAULT '',
+                vin8 TEXT NOT NULL DEFAULT '',
+                mileage_cents INTEGER NOT NULL DEFAULT 0,
+                fee_cents INTEGER NOT NULL DEFAULT 0
+            )",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query("PRAGMA user_version = 4")
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    fn v5_migration_statements() -> Vec<SqlStatement> {
+        [
+            "CREATE TABLE approvers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                name_key TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1
+            )",
+            "CREATE UNIQUE INDEX idx_approvers_name_key ON approvers(name_key)",
+            "ALTER TABLE line_items ADD COLUMN mileage_approver_id INTEGER REFERENCES approvers(id)",
+            "ALTER TABLE line_items ADD COLUMN mileage_approver_name TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE line_items ADD COLUMN mileage_approval_date TEXT NOT NULL DEFAULT ''",
+            "PRAGMA user_version = 5",
+        ]
+        .into_iter()
+        .map(|sql| SqlStatement {
+            sql: sql.into(),
+            params: vec![],
+            expected_rows_affected: None,
+        })
+        .collect()
+    }
 
     #[sqlx::test]
     async fn rolls_back_the_entire_batch_when_a_statement_fails(pool: SqlitePool) {
@@ -198,5 +248,111 @@ mod tests {
 
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|result| result.rows_affected == 1));
+    }
+
+    #[sqlx::test]
+    async fn migrates_a_version_4_database_to_version_5(pool: SqlitePool) {
+        create_v4_line_items(&pool).await;
+
+        execute_statements(&pool, v5_migration_statements())
+            .await
+            .unwrap();
+
+        let approver_columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('approvers') ORDER BY cid")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(approver_columns, ["id", "name", "name_key", "active"]);
+
+        let line_columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('line_items') ORDER BY cid")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert!(line_columns.ends_with(&[
+            "mileage_approver_id".into(),
+            "mileage_approver_name".into(),
+            "mileage_approval_date".into(),
+        ]));
+
+        let foreign_keys = sqlx::query("PRAGMA foreign_key_list(line_items)")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert!(foreign_keys.iter().any(|foreign_key| {
+            foreign_key.get::<String, _>("table") == "approvers"
+                && foreign_key.get::<String, _>("from") == "mileage_approver_id"
+                && foreign_key.get::<String, _>("to") == "id"
+        }));
+
+        let unique: i64 = sqlx::query_scalar(
+            "SELECT \"unique\" FROM pragma_index_list('approvers')
+             WHERE name = 'idx_approvers_name_key'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(unique, 1);
+        let index_columns: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM pragma_index_info('idx_approvers_name_key') ORDER BY seqno",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(index_columns, ["name_key"]);
+
+        sqlx::query("INSERT INTO approvers (name, name_key) VALUES ('Jane', 'jane')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            sqlx::query("INSERT INTO approvers (name, name_key) VALUES ('Janet', 'jane')")
+                .execute(&pool)
+                .await
+                .is_err()
+        );
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(version, 5);
+    }
+
+    #[sqlx::test]
+    async fn rolls_back_the_version_5_migration_when_a_statement_fails(pool: SqlitePool) {
+        create_v4_line_items(&pool).await;
+        let mut statements = v5_migration_statements();
+        statements.push(SqlStatement {
+            sql: "INSERT INTO missing_table (id) VALUES (1)".into(),
+            params: vec![],
+            expected_rows_affected: None,
+        });
+
+        assert!(execute_statements(&pool, statements).await.is_err());
+
+        let approver_table_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'approvers'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(approver_table_count, 0);
+        let line_columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('line_items') ORDER BY cid")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert!(!line_columns
+            .iter()
+            .any(|column| column.starts_with("mileage_approver")));
+        assert!(!line_columns
+            .iter()
+            .any(|column| column == "mileage_approval_date"));
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(version, 4);
     }
 }
