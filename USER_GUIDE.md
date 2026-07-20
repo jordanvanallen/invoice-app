@@ -89,6 +89,16 @@ The bar at the bottom always shows **Subtotal**, **HST**, and **Total** as you g
 
 ---
 
+## Mileage approvals
+
+When a row has a mileage charge above $0.00, Invoice Maker opens a Mileage approval section beneath that row. Choose **Approved by** from your saved Approvers—or use **Add new approver** in the search list—then choose the actual approval date. Both values are required before the invoice can be locked and saved.
+
+Completed approvals can be collapsed to a one-line summary. Changing the mileage amount keeps the approval. A finalized invoice and its PDF print “Mileage approved by [name] on [date]” beneath the charge.
+
+Use **Approvers** in the sidebar to rename, hide, or remove names. Names used on finalized or cancelled invoices are kept for history and can only be made inactive. Duplicating an invoice clears mileage approvals so the new invoice must record fresh approval.
+
+---
+
 ## Stage 5 — Finish and create the PDF
 
 1. When the invoice is complete, click **Lock & Save** (bottom right).
