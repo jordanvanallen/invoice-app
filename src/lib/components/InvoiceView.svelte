@@ -1,7 +1,7 @@
 <script lang="ts">
   import StatusPill from './StatusPill.svelte';
   import { formatDollars } from '$lib/money';
-  import { mileageApprovalText } from '$lib/mileageApproval';
+  import { hasCompleteMileageApproval, mileageApprovalText } from '$lib/mileageApproval';
   import { bpToPercentInput } from '$lib/ui/format';
   import type { FinalizedSnapshot, LineItem } from '$lib/types';
 
@@ -57,7 +57,9 @@
             {#if mileage}<td class="r tnum">{l.mileageCents ? formatDollars(l.mileageCents) : ''}</td>{/if}
             <td class="r tnum">{formatDollars(l.feeCents)}</td>
           </tr>
-          {@const approvalText = mileageApprovalText(l)}
+          {@const approvalText = !preview || hasCompleteMileageApproval(l)
+            ? mileageApprovalText(l)
+            : null}
           {#if approvalText || (preview && l.mileageCents > 0)}
             <tr class="mileage-approval">
               <td colspan={columnCount}>

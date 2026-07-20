@@ -81,6 +81,11 @@ describe('invoice approval component contracts', () => {
     expect(section).toContain('aria-controls="mileage-approval-{row.uid}"');
     expect(section).toContain('inputId={`mileage-approver-${row.uid}`}');
     expect(section).toContain('fieldId={`mileage-approval-date-${row.uid}`}');
+    expect(section).toContain('id={`inspection-number-${row.uid}`}');
+    expect(section).toContain('inputId={`client-${row.uid}`}');
+    expect(section).toContain('inputId={`location-${row.uid}`}');
+    expect(section).toContain('fieldId={`inspection-date-${row.uid}`}');
+    expect(section).toContain('id={`vin8-${row.uid}`}');
     expect(section).toContain('grid-column: 1 / -1');
     expect(section).toContain('container-type: inline-size');
     expect(section).toContain('overflow: visible');
@@ -89,15 +94,27 @@ describe('invoice approval component contracts', () => {
 
   test('invoice sections preserve deterministic mileage disclosure transitions', () => {
     const section = readSource('src/lib/components/InvoiceSection.svelte');
-    const mileageHandler = section.slice(
-      section.indexOf('function onMileage('),
+    const inputHandlers = section.slice(
+      section.indexOf('function onFee('),
       section.indexOf('function blurFee('),
     );
 
-    expect(mileageHandler).toContain('const priorCents = rows[i].mileageCents;');
-    expect(mileageHandler).toContain('priorCents <= 0 && row.mileageCents > 0');
-    expect(mileageHandler).toContain('row.approvalCollapsed = false;');
-    expect(mileageHandler).not.toContain('.focus(');
+    expect(section).not.toContain('bind:value={row.mileageText}');
+    expect(section).not.toContain('bind:value={row.feeText}');
+    expect(inputHandlers).toContain('function onFee(i: number, event: Event)');
+    expect(inputHandlers).toContain('function onMileage(i: number, event: Event)');
+    expect(inputHandlers.match(/\(event\.currentTarget as HTMLInputElement\)\.value/g)).toHaveLength(2);
+    expect(inputHandlers).toContain('row.feeText = next.text;');
+    expect(inputHandlers).toContain('row.feeCents = next.cents;');
+    expect(inputHandlers).toContain('row.mileageText = next.text;');
+    expect(inputHandlers).toContain('row.mileageCents = next.cents;');
+    expect(inputHandlers).toContain('if (next.becamePositive)');
+    expect(inputHandlers).toContain('row.approvalCollapsed = false;');
+    expect(inputHandlers).not.toContain('.focus(');
+    expect(section).toContain('value={row.mileageText} oninput={(event) => onMileage(i, event)}');
+    expect(section).toContain('value={row.feeText} oninput={(event) => onFee(i, event)}');
+    expect(section).toContain('canonicalInvoiceMoneyInput(rows[i].feeCents)');
+    expect(section).toContain('canonicalInvoiceMoneyInput(rows[i].mileageCents, true)');
     expect(section).toContain('hasCompleteMileageApproval(row)');
     expect(section).toContain('mileageApprovalText(row)');
     expect(section).toContain('const approvalExpanded = !approvalComplete || !row.approvalCollapsed');
@@ -113,24 +130,26 @@ describe('invoice approval component contracts', () => {
     expect(route.match(/<InvoiceSection/g)).toHaveLength(2);
     expect(route).toContain('{approvers} {addApprover}');
     expect(route).toContain('invoiceFinalizeBlockers(buildDraft())');
-    expect(route).toContain('mileage-approver-${row.uid}');
-    expect(route).toContain('mileage-approval-date-${row.uid}');
+    expect(route).toContain('mileage-approver-${uid}');
+    expect(route).toContain('mileage-approval-date-${uid}');
     expect(route).toContain('<InvoiceView snap={previewSnap} preview />');
   });
 
   test('invoice view prints row-local approval evidence and preview-only missing approval copy', () => {
     const view = readSource('src/lib/components/InvoiceView.svelte');
 
-    expect(view).toContain("import { mileageApprovalText } from '$lib/mileageApproval';");
+    expect(view).toContain("import { hasCompleteMileageApproval, mileageApprovalText } from '$lib/mileageApproval';");
     expect(view).toContain('let { snap, preview = false }');
     expect(view).toContain('{@const columnCount = mileage ? 8 : 7}');
-    expect(view).toContain('{@const approvalText = mileageApprovalText(l)}');
+    expect(view).toContain('{@const approvalText = !preview || hasCompleteMileageApproval(l)');
+    expect(view).toContain('? mileageApprovalText(l)');
+    expect(view).toContain(': null}');
     expect(view).toContain('{#if approvalText || (preview && l.mileageCents > 0)}');
     expect(view).toContain('<tr class="mileage-approval">');
     expect(view).toContain('<td colspan={columnCount}>');
     expect(view).toContain("{approvalText ?? 'Mileage approval required'}");
     expect(view).toMatch(
-      /<\/tr>\s*{@const approvalText = mileageApprovalText\(l\)}\s*{#if approvalText \|\| \(preview && l\.mileageCents > 0\)}\s*<tr class="mileage-approval">/,
+      /<\/tr>\s*{@const approvalText = !preview \|\| hasCompleteMileageApproval\(l\)[\s\S]*?{#if approvalText \|\| \(preview && l\.mileageCents > 0\)}\s*<tr class="mileage-approval">/,
     );
   });
 
@@ -154,10 +173,17 @@ describe('invoice approval component contracts', () => {
     expect(route).toContain('const blockedLineIndices = $derived(new Set(');
     expect(route).toContain('const blockerCount = $derived(blockedLineIndices.size);');
     expect(route).toContain("const canFinalize = $derived(finalizeBlockers.length === 0 && seqState.status === 'ready');");
+    expect(route).toContain("inspectionNumber: (uid) => `inspection-number-${uid}`");
+    expect(route).toContain("client: (uid) => `client-${uid}`");
+    expect(route).toContain("location: (uid) => `location-${uid}`");
+    expect(route).toContain("date: (uid) => `inspection-date-${uid}`");
+    expect(route).toContain("vin8: (uid) => `vin8-${uid}`");
+    expect(route).toContain("mileageApprover: (uid) => `mileage-approver-${uid}`");
+    expect(route).toContain("mileageApprovalDate: (uid) => `mileage-approval-date-${uid}`");
     expect(jumpHandler).toContain('row.approvalCollapsed = false;');
     expect(jumpHandler).toContain('await tick();');
-    expect(jumpHandler).toContain('document.getElementById(`mileage-approver-${row.uid}`)');
-    expect(jumpHandler).toContain('document.getElementById(`mileage-approval-date-${row.uid}`)');
-    expect(jumpHandler).toContain("el?.querySelector('input')");
+    expect(jumpHandler).toContain('const targetId = blockerFocusIds[blocker.field]?.(row.uid);');
+    expect(jumpHandler).toContain('document.getElementById(targetId)?.focus();');
+    expect(jumpHandler).not.toContain("querySelector('input')");
   });
 });

@@ -20,7 +20,7 @@ export interface LineItem {
   date: string;
   /** Last 8 of VIN, normalized (uppercase, no spaces). */
   vin8: string;
-  /** Taxable billable add-on; 0 when none. Not used on no-show lines. */
+  /** Optional taxable billable add-on; 0 when none. Available on completed and no-show lines. */
   mileageCents: Cents;
   mileageApproverId: number | null;
   mileageApproverName: string;

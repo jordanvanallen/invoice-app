@@ -40,6 +40,15 @@ test('requires a linked saved approver for a complete mileage approval', () => {
   expect(hasCompleteMileageApproval(line('completed', { mileageCents: 0 }))).toBe(false);
 });
 
+test('keeps legacy evidence text ID-tolerant while an unlinked draft remains incomplete', () => {
+  const unlinked = line('completed', { mileageApproverId: null });
+
+  expect(mileageApprovalText(unlinked)).toBe(
+    'Mileage approved by Jordan Lee on Jul 18, 2026',
+  );
+  expect(hasCompleteMileageApproval(unlinked)).toBe(false);
+});
+
 test('collapses only loaded complete approvals while new rows remain expanded', () => {
   expect(toEditorRow(line('completed')).approvalCollapsed).toBe(true);
   expect(toEditorRow(line('noshow')).approvalCollapsed).toBe(true);

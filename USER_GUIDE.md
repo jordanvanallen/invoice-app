@@ -78,7 +78,7 @@ In the **Completed Inspections** section, click **+ Add inspection** to add a ro
 Press **Enter** on the Fee box to quickly start the next row. To remove a row, click the **✕**. Removed a row by accident? An **Undo** appears.
 
 **4c. Add no‑shows**
-The **No‑Shows** section works the same way (default $25 each), without mileage.
+The **No‑Shows** section works the same way (default $25 each), including optional mileage. Any mileage charge requires the same **Approved by** and **Approval date** details described below.
 
 **Put rows in date order**
 

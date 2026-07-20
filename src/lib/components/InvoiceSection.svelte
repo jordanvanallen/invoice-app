@@ -3,7 +3,7 @@
   import DatePicker from './DatePicker.svelte';
   import { formatDollars } from '$lib/money';
   import { mileageApprovalText, hasCompleteMileageApproval } from '$lib/mileageApproval';
-  import { centsToInput } from '$lib/ui/format';
+  import { canonicalInvoiceMoneyInput, invoiceMoneyInputTransition } from '$lib/ui/format';
   import { formatIsoDate, normalizeVin8, isValidVin8, isValidIsoDate, isDateOutsidePeriod } from '$lib/validation';
   import type { CatalogEntry } from '$lib/db/catalog-repo';
   import { newRow, type EditorRow } from '$lib/ui/editorRow';
@@ -94,23 +94,30 @@
     rows = next;
     undo = null;
   }
-  /** Dollar text -> cents (0 if blank/invalid). Doesn't touch the text the user typed. */
-  function toCents(s: string): number {
-    const n = Number(s.trim());
-    return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : 0;
-  }
-  function onFee(i: number) { rows[i].feeCents = toCents(rows[i].feeText); }
-  function onMileage(i: number) {
+  function onFee(i: number, event: Event) {
     const row = rows[i];
-    const priorCents = rows[i].mileageCents;
-    row.mileageCents = toCents(row.mileageText);
-    if (priorCents <= 0 && row.mileageCents > 0) {
+    const next = invoiceMoneyInputTransition(
+      row.feeCents,
+      (event.currentTarget as HTMLInputElement).value,
+    );
+    row.feeText = next.text;
+    row.feeCents = next.cents;
+  }
+  function onMileage(i: number, event: Event) {
+    const row = rows[i];
+    const next = invoiceMoneyInputTransition(
+      row.mileageCents,
+      (event.currentTarget as HTMLInputElement).value,
+    );
+    row.mileageText = next.text;
+    row.mileageCents = next.cents;
+    if (next.becamePositive) {
       row.approvalCollapsed = false;
     }
   }
   // Tidy the display to 2 decimals once the user leaves the field.
-  function blurFee(i: number) { rows[i].feeText = centsToInput(rows[i].feeCents); }
-  function blurMileage(i: number) { rows[i].mileageText = rows[i].mileageCents ? centsToInput(rows[i].mileageCents) : ''; }
+  function blurFee(i: number) { rows[i].feeText = canonicalInvoiceMoneyInput(rows[i].feeCents); }
+  function blurMileage(i: number) { rows[i].mileageText = canonicalInvoiceMoneyInput(rows[i].mileageCents, true); }
 </script>
 
 <section class="card {tone}">
@@ -139,18 +146,18 @@
       && !isValidIsoDate(row.mileageApprovalDate)}
     {@const approvalExpanded = !approvalComplete || !row.approvalCollapsed}
     <div class="row" id="row-{row.uid}">
-      <input class="tnum" placeholder="Inspection #" bind:value={row.inspectionNumber} />
+      <input id={`inspection-number-${row.uid}`} class="tnum" placeholder="Inspection #" bind:value={row.inspectionNumber} />
       <FuzzyCombobox label="" noun="client" entries={clients} onAddNew={addClient}
-        bind:selectedId={row.clientId} bind:text={row.clientName} />
+        inputId={`client-${row.uid}`} bind:selectedId={row.clientId} bind:text={row.clientName} />
       <FuzzyCombobox label="" noun="location" entries={locations} onAddNew={addLocation}
-        bind:selectedId={row.locationId} bind:text={row.location} />
-      <DatePicker block bind:value={row.date} ariaLabel="Inspection date" />
-      <input class="tnum vin" placeholder="8 chars" value={row.vin8}
+        inputId={`location-${row.uid}`} bind:selectedId={row.locationId} bind:text={row.location} />
+      <DatePicker block bind:value={row.date} ariaLabel="Inspection date" fieldId={`inspection-date-${row.uid}`} />
+      <input id={`vin8-${row.uid}`} class="tnum vin" placeholder="8 chars" value={row.vin8}
         oninput={(e) => (row.vin8 = normalizeVin8((e.currentTarget as HTMLInputElement).value))} />
       <input class="tnum right" type="text" inputmode="decimal" placeholder="0.00"
-        bind:value={row.mileageText} oninput={() => onMileage(i)} onblur={() => blurMileage(i)} />
+        value={row.mileageText} oninput={(event) => onMileage(i, event)} onblur={() => blurMileage(i)} />
       <input class="tnum right fee" type="text" inputmode="decimal"
-        bind:value={row.feeText} oninput={() => onFee(i)} onblur={() => blurFee(i)}
+        value={row.feeText} oninput={(event) => onFee(i, event)} onblur={() => blurFee(i)}
         onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAndFocusNext(); } }} />
       <button class="del" title="Remove this row" onclick={() => removeRow(i)} aria-label="Remove row">✕</button>
       {#if warns.length}

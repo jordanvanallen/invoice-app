@@ -22,7 +22,7 @@
   import { saveInvoicePdf } from '$lib/pdf/generate';
   import { showSaveToast } from '$lib/stores/toast';
   import { backupNow } from '$lib/stores/backup';
-  import { invoiceFinalizeBlockers, findDuplicates } from '$lib/validation';
+  import { invoiceFinalizeBlockers, findDuplicates, type InvoiceFinalizeField } from '$lib/validation';
   import { formatDollars } from '$lib/money';
   import { bpToPercentInput } from '$lib/ui/format';
   import {
@@ -268,6 +268,15 @@
   ));
   const blockerCount = $derived(blockedLineIndices.size);
   const canFinalize = $derived(finalizeBlockers.length === 0 && seqState.status === 'ready');
+  const blockerFocusIds: Partial<Record<InvoiceFinalizeField, (uid: number) => string>> = {
+    inspectionNumber: (uid) => `inspection-number-${uid}`,
+    client: (uid) => `client-${uid}`,
+    location: (uid) => `location-${uid}`,
+    date: (uid) => `inspection-date-${uid}`,
+    vin8: (uid) => `vin8-${uid}`,
+    mileageApprover: (uid) => `mileage-approver-${uid}`,
+    mileageApprovalDate: (uid) => `mileage-approval-date-${uid}`,
+  };
 
   async function jumpToBlocker() {
     const blocker = finalizeBlockers.find((candidate) => candidate.lineIndex !== null);
@@ -280,14 +289,10 @@
     if (blocker.field === 'mileageApprover' || blocker.field === 'mileageApprovalDate') {
       row.approvalCollapsed = false;
       await tick();
-      const target = blocker.field === 'mileageApprover'
-        ? document.getElementById(`mileage-approver-${row.uid}`)
-        : document.getElementById(`mileage-approval-date-${row.uid}`);
-      target?.focus();
-      return;
     }
 
-    (el?.querySelector('input') as HTMLInputElement | null)?.focus();
+    const targetId = blockerFocusIds[blocker.field]?.(row.uid);
+    if (targetId) document.getElementById(targetId)?.focus();
   }
 
   async function doFinalize() {
