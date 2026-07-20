@@ -673,10 +673,13 @@ git commit -m "Validate mileage approvals"
 - Modify: `src/lib/db/invoice-repo.ts`
 - Modify: `src/lib/db/invoice-repo.test.ts`
 - Modify: `src/lib/snapshot.test.ts`
+- Modify: `src/lib/db/schema.ts`, `src/lib/db/migrate.test.ts`, `src/lib/db/restore.ts`, `src/lib/db/restore.test.ts` — review hardening adds append-only migration 6 and its exact backup fingerprint.
+- Modify: `src/lib/db/catalog-repo.ts`, `src/lib/db/catalog-repo.test.ts` — catalog-driven draft detaches participate in the draft-revision protocol.
+- Modify: `src-tauri/src/database.rs` — native migration-6 rollback and foreign-key enforcement proof.
 
 **Interfaces:**
 - Consumes: Task 1 atomic batches, Task 2 fields, Task 4 blockers.
-- Produces: approval-aware `saveDraft`, `loadDraft`, `finalizeInvoice`, and `duplicateInvoice`.
+- Produces: approval-aware `saveDraft`, `loadDraft`, `finalizeInvoice`, and `duplicateInvoice`, plus revision-guarded draft mutation and counter-CAS automatic numbering.
 
 - [ ] **Step 1: Write failing persistence/finalization tests**
 
@@ -686,7 +689,11 @@ Add the following concrete cases around the existing `line()`/`freshDb()` helper
 2. invalid approval rejects before automatic allocation and before manual reservation;
 3. an injected conditional-update failure rolls back `year_counters`, status, timestamp, totals, and snapshot;
 4. finalized snapshot/reprint retains the old displayed approver after catalog rename/deactivation; and
-5. duplicate clears all three fields for completed/no-show, positive/zero-mileage rows from draft/finalized/void sources.
+5. duplicate clears all three fields for completed/no-show, positive/zero-mileage rows from draft/finalized/void sources;
+6. stale saves and catalog-driven draft detaches increment `draft_revision` and invalidate an already-read finalization;
+7. concurrent automatic finalizations reserve distinct increasing sequences through the counter CAS;
+8. a higher concurrent manual reservation makes the automatic path retry above it; and
+9. a version-5 backup with a stray `draft_revision` column is rejected, while genuine v5 migrates cleanly to v6.
 
 ```ts
 test('round-trips a linked approval and resolves an approver rename in a draft', async () => {
@@ -788,54 +795,26 @@ l.mileageApproverId, l.mileageApproverName, l.mileageApprovalDate,
 
 Load with `LEFT JOIN approvers a ON a.id = li.mileage_approver_id` and resolve linked draft names as `live_approver_name ?? stored_approver_name`.
 
+Append migration 6 without editing migrations 1–5:
+
+```sql
+ALTER TABLE invoices ADD COLUMN draft_revision INTEGER NOT NULL DEFAULT 0
+```
+
+`saveDraft` uses `executeStatementsAtomically`: its first statement updates only `status = 'draft'`, increments `draft_revision`, and requires one affected row; line deletion and replacement follow in that same batch. Catalog deletion increments the revision once per affected draft invoice before detaching references, in the same detach/delete batch. Backup validation accepts genuine v5, rejects a partial v6 shape mislabeled as v5, and requires the exact v6 column fingerprint.
+
 - [ ] **Step 4: Replace sequential finalization with validated fixed statements**
 
 Implement the full boundary:
 
-```ts
-export async function finalizeInvoice(db: Db, invoiceId: number): Promise<FinalizedSnapshot> {
-  const draft = await loadDraft(db, invoiceId);
-  const normalizedDraft = { ...draft, year: deriveInvoiceYear(draft.issueDate, draft.year) };
-  const blockers = invoiceFinalizeBlockers(normalizedDraft);
-  if (blockers.length) throw new Error(blockers[0].message);
+1. Load the invoice header and `draft_revision` together, then load its lines. Validate the normalized draft before reading or mutating sequence state.
+2. For a manual sequence, validate the override and use the existing monotonic counter reservation as the first statement in the finalization batch.
+3. For automatic numbering, observe both the counter value and highest assigned invoice sequence. Build a candidate above both. The first batch statement inserts the missing counter or updates it only when its current value still equals the observed value; require exactly one affected row.
+4. The finalized invoice update writes sequence, year, status, timestamp, totals, and snapshot only when `status = 'draft'`, `draft_revision` still equals the loaded revision, and no other invoice owns the candidate. Require exactly one affected row.
+5. If the automatic batch loses an affected-row race, retry only when the target invoice is still a draft at the same revision. Re-observe the counter/maximum and rebuild the snapshot for the new candidate. Bound retries to three and never retry arbitrary SQL errors or stale draft/status failures.
+6. Return only the snapshot from the successful atomic batch. Any failed attempt rolls back both counter reservation and every finalized-state column.
 
-  const settings = await getSettings(db);
-  const seq = normalizedDraft.seq === null
-    ? await peekNextSeq(db, normalizedDraft.year, invoiceId)
-    : normalizedDraft.seq;
-  if (normalizedDraft.seq !== null) {
-    validateSeqResult(seq, await takenSeqs(db, normalizedDraft.year, invoiceId));
-  }
-  const snapshot = buildFinalizedSnapshot(normalizedDraft, settings, seq);
-
-  await executeStatementsAtomically(db, [
-    {
-      sql: `INSERT INTO year_counters (year, last_seq) VALUES (?, ?)
-            ON CONFLICT(year) DO UPDATE SET last_seq =
-              CASE WHEN last_seq < excluded.last_seq THEN excluded.last_seq ELSE last_seq END`,
-      params: [normalizedDraft.year, seq],
-    },
-    {
-      sql: `UPDATE invoices SET
-              seq = ?, year = ?, status = 'finalized', finalized_at = ?,
-              subtotal_cents = ?, tax_cents = ?, total_cents = ?, snapshot_json = ?
-            WHERE id = ? AND status = 'draft'
-              AND NOT EXISTS (
-                SELECT 1 FROM invoices other
-                WHERE other.year = ? AND other.seq = ? AND other.id != ?
-              )`,
-      params: [
-        seq, normalizedDraft.year, snapshot.issueDate,
-        snapshot.totals.subtotalCents, snapshot.totals.taxCents, snapshot.totals.totalCents,
-        JSON.stringify(snapshot), invoiceId,
-        normalizedDraft.year, seq, invoiceId,
-      ],
-      expectedRowsAffected: 1,
-    },
-  ]);
-  return snapshot;
-}
-```
+Keep `peekNextSeq` non-mutating for editor preview only; finalization must not treat the preview peek as a reservation.
 
 - [ ] **Step 5: Make duplication atomic and clear approvals after the spread**
 
