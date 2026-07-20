@@ -44,10 +44,26 @@ interface LineRow {
   fee_cents: number;
 }
 
-export async function loadDraft(db: Db, invoiceId: number): Promise<DraftInvoice> {
-  const [head] = await db.select<{
-    year: number; seq: number | null; issue_date: string; period_start: string; period_end: string;
-  }>('SELECT year, seq, issue_date, period_start, period_end FROM invoices WHERE id = ?', [invoiceId]);
+interface DraftHeadRow {
+  year: number;
+  seq: number | null;
+  issue_date: string;
+  period_start: string;
+  period_end: string;
+  draft_revision: number;
+}
+
+interface LoadedDraft {
+  draft: DraftInvoice;
+  draftRevision: number;
+}
+
+async function loadDraftWithRevision(db: Db, invoiceId: number): Promise<LoadedDraft> {
+  const [head] = await db.select<DraftHeadRow>(
+    `SELECT year, seq, issue_date, period_start, period_end, draft_revision
+       FROM invoices WHERE id = ?`,
+    [invoiceId],
+  );
 
   const rows = await db.select<LineRow>(
     `SELECT li.type, li.position, li.inspection_number,
@@ -83,13 +99,20 @@ export async function loadDraft(db: Db, invoiceId: number): Promise<DraftInvoice
   }));
 
   return {
-    seq: head.seq,
-    year: head.year,
-    issueDate: head.issue_date,
-    periodStart: head.period_start,
-    periodEnd: head.period_end,
-    lines,
+    draft: {
+      seq: head.seq,
+      year: head.year,
+      issueDate: head.issue_date,
+      periodStart: head.period_start,
+      periodEnd: head.period_end,
+      lines,
+    },
+    draftRevision: head.draft_revision,
   };
+}
+
+export async function loadDraft(db: Db, invoiceId: number): Promise<DraftInvoice> {
+  return (await loadDraftWithRevision(db, invoiceId)).draft;
 }
 
 type SaveableDraft = Omit<DraftInvoice, 'seq'> & { seq?: number | null };
@@ -104,29 +127,36 @@ export async function saveDraft(
   invoiceId: number,
   draft: SaveableDraft,
 ): Promise<void> {
-  await runInTransaction(db, async () => {
-    const year = deriveInvoiceYear(draft.issueDate, draft.year);
-    if (draft.seq !== undefined && draft.seq !== null) {
-      validateSeqResult(draft.seq, await takenSeqs(db, year, invoiceId));
-    }
-    await db.execute(
-      `UPDATE invoices SET seq = ?, year = ?, issue_date = ?, period_start = ?, period_end = ? WHERE id = ?`,
-      [draft.seq ?? null, year, draft.issueDate, draft.periodStart, draft.periodEnd, invoiceId],
-    );
-    await db.execute('DELETE FROM line_items WHERE invoice_id = ?', [invoiceId]);
-    for (const l of draft.lines) {
-      await db.execute(
-        `INSERT INTO line_items
-           (invoice_id, type, position, inspection_number, client_id, client_name,
-            location_id, location, date, vin8, mileage_cents, fee_cents,
-            mileage_approver_id, mileage_approver_name, mileage_approval_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [invoiceId, l.type, l.position, l.inspectionNumber, l.clientId, l.clientName,
-         l.locationId, l.location, l.date, l.vin8, l.mileageCents, l.feeCents,
-         l.mileageApproverId, l.mileageApproverName, l.mileageApprovalDate],
-      );
-    }
-  });
+  const year = deriveInvoiceYear(draft.issueDate, draft.year);
+  if (draft.seq !== undefined && draft.seq !== null) {
+    validateSeqResult(draft.seq, await takenSeqs(db, year, invoiceId));
+  }
+  await executeStatementsAtomically(db, [
+    {
+      sql: `UPDATE invoices SET
+              seq = ?, year = ?, issue_date = ?, period_start = ?, period_end = ?,
+              draft_revision = draft_revision + 1
+            WHERE id = ? AND status = 'draft'`,
+      params: [
+        draft.seq ?? null, year, draft.issueDate, draft.periodStart, draft.periodEnd, invoiceId,
+      ],
+      expectedRowsAffected: 1,
+    },
+    { sql: 'DELETE FROM line_items WHERE invoice_id = ?', params: [invoiceId] },
+    ...draft.lines.map((line) => ({
+      sql: `INSERT INTO line_items
+              (invoice_id, type, position, inspection_number, client_id, client_name,
+               location_id, location, date, vin8, mileage_cents, fee_cents,
+               mileage_approver_id, mileage_approver_name, mileage_approval_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [
+        invoiceId, line.type, line.position, line.inspectionNumber, line.clientId, line.clientName,
+        line.locationId, line.location, line.date, line.vin8, line.mileageCents, line.feeCents,
+        line.mileageApproverId, line.mileageApproverName, line.mileageApprovalDate,
+      ],
+      expectedRowsAffected: 1,
+    })),
+  ]);
 }
 
 /** Persist the canonical row order used immediately before finalization. */
@@ -151,7 +181,7 @@ function validateSeqResult(seq: number, taken: number[]): void {
  * status. One transaction. Returns the snapshot.
  */
 export async function finalizeInvoice(db: Db, invoiceId: number): Promise<FinalizedSnapshot> {
-  const draft = await loadDraft(db, invoiceId);
+  const { draft, draftRevision } = await loadDraftWithRevision(db, invoiceId);
   const normalizedDraft = { ...draft, year: deriveInvoiceYear(draft.issueDate, draft.year) };
   const blockers = invoiceFinalizeBlockers(normalizedDraft);
   if (blockers.length) throw new Error(blockers[0].message);
@@ -177,7 +207,7 @@ export async function finalizeInvoice(db: Db, invoiceId: number): Promise<Finali
       `UPDATE invoices SET
               seq = ?, year = ?, status = 'finalized', finalized_at = ?,
               subtotal_cents = ?, tax_cents = ?, total_cents = ?, snapshot_json = ?
-            WHERE id = ? AND status = 'draft'
+            WHERE id = ? AND status = 'draft' AND draft_revision = ?
               AND NOT EXISTS (
                 SELECT 1 FROM invoices other
                 WHERE other.year = ? AND other.seq = ? AND other.id != ?
@@ -185,7 +215,7 @@ export async function finalizeInvoice(db: Db, invoiceId: number): Promise<Finali
       params: [
         seq, normalizedDraft.year, snapshot.issueDate,
         snapshot.totals.subtotalCents, snapshot.totals.taxCents, snapshot.totals.totalCents,
-        JSON.stringify(snapshot), invoiceId,
+        JSON.stringify(snapshot), invoiceId, draftRevision,
         normalizedDraft.year, seq, invoiceId,
       ],
       expectedRowsAffected: 1,
@@ -316,6 +346,7 @@ export async function latestDraftId(db: Db): Promise<number | null> {
 /** Copy an invoice's line items into a brand-new draft (new dates). Returns the draft id. */
 export async function duplicateInvoice(db: Db, sourceId: number, header: DraftHeader): Promise<number> {
   const src = await loadDraft(db, sourceId);
+  const year = deriveInvoiceYear(header.issueDate, header.year);
   const [{ id }] = await db.select<{ id: number }>(
     'SELECT COALESCE(MAX(id), 0) + 1 AS id FROM invoices',
   );
@@ -331,7 +362,7 @@ export async function duplicateInvoice(db: Db, sourceId: number, header: DraftHe
       sql: `INSERT INTO invoices
               (id, year, status, issue_date, period_start, period_end)
             VALUES (?, ?, 'draft', ?, ?, ?)`,
-      params: [id, header.year, header.issueDate, header.periodStart, header.periodEnd],
+      params: [id, year, header.issueDate, header.periodStart, header.periodEnd],
       expectedRowsAffected: 1,
     },
     ...copied.map((line) => ({

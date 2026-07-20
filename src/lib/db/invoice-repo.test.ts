@@ -82,6 +82,56 @@ describe('invoice draft repo', () => {
     expect((await loadDraft(db, id)).lines).toHaveLength(1);
   });
 
+  test.each(['finalized', 'void'] as const)(
+    'rejects an adapter-path save against a %s invoice without changing header or lines',
+    async (status) => {
+      const db = await freshDb();
+      const id = await createDraft(db, {
+        year: 2026, issueDate: '2026-05-28',
+        periodStart: '2026-05-21', periodEnd: '2026-05-27',
+      });
+      await saveDraft(db, id, {
+        year: 2026, issueDate: '2026-05-28',
+        periodStart: '2026-05-21', periodEnd: '2026-05-27',
+        lines: [line()],
+      });
+      await finalizeInvoice(db, id);
+      if (status === 'void') await voidInvoice(db, id);
+      const invoiceBefore = await db.select('SELECT * FROM invoices WHERE id = ?', [id]);
+      const linesBefore = await db.select(
+        'SELECT * FROM line_items WHERE invoice_id = ? ORDER BY position, id',
+        [id],
+      );
+      let batches = 0;
+      const adapterDb: Db = {
+        execute: async (sql, params) => {
+          if (/^\s*(BEGIN|COMMIT|ROLLBACK)\b/i.test(sql)) {
+            throw new Error(`raw transaction command is not supported: ${sql}`);
+          }
+          return db.execute(sql, params);
+        },
+        select: db.select.bind(db),
+        executeTransaction: async (statements) => {
+          batches += 1;
+          return executeStatementsAtomically(db, statements);
+        },
+      };
+
+      await expect(saveDraft(adapterDb, id, {
+        year: 2030, issueDate: '2030-01-10',
+        periodStart: '2030-01-01', periodEnd: '2030-01-09',
+        lines: [line({ inspectionNumber: '87654321', vin8: 'NEWVIN88' })],
+      })).rejects.toThrow(/expected 1 row.*affected 0/i);
+
+      expect(batches).toBe(1);
+      expect(await db.select('SELECT * FROM invoices WHERE id = ?', [id])).toEqual(invoiceBefore);
+      expect(await db.select(
+        'SELECT * FROM line_items WHERE invoice_id = ? ORDER BY position, id',
+        [id],
+      )).toEqual(linesBefore);
+    },
+  );
+
   test('saveDraftInDateOrder persists separate chronological sections and canonical positions', async () => {
     const db = await freshDb();
     const id = await createDraft(db, {
@@ -232,6 +282,54 @@ describe('finalize + reprint', () => {
 
     await expect(finalizeInvoice(failingDb, id)).rejects.toThrow(/expected 1 row.*affected 0/i);
 
+    expect(await db.select('SELECT * FROM year_counters')).toEqual([]);
+    expect(await db.select(
+      'SELECT status, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json FROM invoices WHERE id = ?',
+      [id],
+    )).toEqual([{
+      status: 'draft', finalized_at: null, subtotal_cents: 0,
+      tax_cents: 0, total_cents: 0, snapshot_json: null,
+    }]);
+  });
+
+  test('rejects a stale finalization when a concurrent save advances the draft revision', async () => {
+    const db = await freshDb();
+    const id = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    await saveDraft(db, id, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line({ inspectionNumber: '11111111', vin8: 'OLDVIN11' })],
+    });
+    const latestDraft = {
+      year: 2026, issueDate: '2026-07-21',
+      periodStart: '2026-07-14', periodEnd: '2026-07-20',
+      lines: [line({
+        inspectionNumber: '22222222', vin8: 'NEWVIN22',
+        date: '2026-07-20', feeCents: 4100,
+      })],
+    };
+    let saveInjected = false;
+    const racingDb: Db = {
+      execute: (sql, params) => db.execute(sql, params),
+      select: db.select.bind(db),
+      executeTransaction: async (statements) => {
+        if (!saveInjected && statements.some((statement) => statement.sql.includes("status = 'finalized'"))) {
+          saveInjected = true;
+          await saveDraft(db, id, latestDraft);
+        }
+        return executeStatementsAtomically(db, statements);
+      },
+    };
+
+    await expect(finalizeInvoice(racingDb, id)).rejects.toThrow(/expected 1 row.*affected 0/i);
+
+    expect(saveInjected).toBe(true);
+    expect(await loadDraft(db, id)).toEqual({ seq: null, ...latestDraft });
+    expect(await db.select('SELECT draft_revision FROM invoices WHERE id = ?', [id]))
+      .toEqual([{ draft_revision: 2 }]);
     expect(await db.select('SELECT * FROM year_counters')).toEqual([]);
     expect(await db.select(
       'SELECT status, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json FROM invoices WHERE id = ?',
@@ -524,6 +622,75 @@ describe('duplicateInvoice', () => {
     expect(dup.lines.map((l) => l.inspectionNumber)).toEqual(['X1']);
     const [row] = await db.select<{ status: string }>('SELECT status FROM invoices WHERE id = ?', [dupId]);
     expect(row.status).toBe('draft');
+  });
+
+  test('derives the duplicate year from its issue date', async () => {
+    const db = await freshDb();
+    const sourceId = await createDraft(db, {
+      year: 2026, issueDate: '2026-12-31',
+      periodStart: '2026-12-20', periodEnd: '2026-12-31',
+    });
+    await saveDraft(db, sourceId, {
+      year: 2026, issueDate: '2026-12-31',
+      periodStart: '2026-12-20', periodEnd: '2026-12-31',
+      lines: [line()],
+    });
+
+    const duplicateId = await duplicateInvoice(db, sourceId, {
+      year: 2026, issueDate: '2027-01-03',
+      periodStart: '2026-12-27', periodEnd: '2027-01-02',
+    });
+
+    expect(await db.select('SELECT year FROM invoices WHERE id = ?', [duplicateId]))
+      .toEqual([{ year: 2027 }]);
+  });
+
+  test('rolls back a duplicate batch when another invoice claims its explicit id', async () => {
+    const db = await freshDb();
+    const sourceId = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    await saveDraft(db, sourceId, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line()],
+    });
+    const sourceBefore = await loadDraft(db, sourceId);
+    const sourceRowsBefore = await db.select(
+      'SELECT * FROM line_items WHERE invoice_id = ? ORDER BY position, id',
+      [sourceId],
+    );
+    let claimedId: number | null = null;
+    const racingDb: Db = {
+      execute: (sql, params) => db.execute(sql, params),
+      select: db.select.bind(db),
+      executeTransaction: async (statements) => {
+        claimedId = Number(statements[0]?.params?.[0]);
+        await db.execute(
+          `INSERT INTO invoices
+             (id, year, status, issue_date, period_start, period_end)
+           VALUES (?, 2026, 'draft', '2026-07-27', '2026-07-20', '2026-07-26')`,
+          [claimedId],
+        );
+        return executeStatementsAtomically(db, statements);
+      },
+    };
+
+    await expect(duplicateInvoice(racingDb, sourceId, {
+      year: 2026, issueDate: '2026-07-27',
+      periodStart: '2026-07-20', periodEnd: '2026-07-26',
+    })).rejects.toThrow();
+
+    expect(claimedId).not.toBeNull();
+    expect(await loadDraft(db, sourceId)).toEqual(sourceBefore);
+    expect(await db.select(
+      'SELECT * FROM line_items WHERE invoice_id = ? ORDER BY position, id',
+      [sourceId],
+    )).toEqual(sourceRowsBefore);
+    expect(await db.select('SELECT id, status FROM invoices WHERE id = ?', [claimedId]))
+      .toEqual([{ id: claimedId, status: 'draft' }]);
+    expect(await db.select('SELECT * FROM line_items WHERE invoice_id = ?', [claimedId])).toEqual([]);
   });
 
   test('clears every approval field for each line and source state', async () => {

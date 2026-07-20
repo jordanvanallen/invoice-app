@@ -170,6 +170,20 @@ mod tests {
         .collect()
     }
 
+    fn v6_migration_statements() -> Vec<SqlStatement> {
+        [
+            "ALTER TABLE invoices ADD COLUMN draft_revision INTEGER NOT NULL DEFAULT 0",
+            "PRAGMA user_version = 6",
+        ]
+        .into_iter()
+        .map(|sql| SqlStatement {
+            sql: sql.into(),
+            params: vec![],
+            expected_rows_affected: None,
+        })
+        .collect()
+    }
+
     #[sqlx::test]
     async fn rolls_back_the_entire_batch_when_a_statement_fails(pool: SqlitePool) {
         sqlx::query("CREATE TABLE values_test (value INTEGER UNIQUE)")
@@ -401,5 +415,70 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(version, 4);
+    }
+
+    #[sqlx::test]
+    async fn migrates_a_populated_version_5_database_to_version_6(pool: SqlitePool) {
+        create_v4_line_items(&pool).await;
+        execute_statements(&pool, v5_migration_statements())
+            .await
+            .unwrap();
+
+        execute_statements(&pool, v6_migration_statements())
+            .await
+            .unwrap();
+
+        let draft_revision: i64 =
+            sqlx::query_scalar("SELECT draft_revision FROM invoices WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(draft_revision, 0);
+        let revision_column: (String, String, i64, String) = sqlx::query_as(
+            "SELECT name, type, \"notnull\", dflt_value
+               FROM pragma_table_info('invoices')
+              WHERE name = 'draft_revision'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            revision_column,
+            ("draft_revision".into(), "INTEGER".into(), 1, "0".into())
+        );
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(version, 6);
+    }
+
+    #[sqlx::test]
+    async fn rolls_back_the_version_6_migration_when_a_later_statement_fails(pool: SqlitePool) {
+        create_v4_line_items(&pool).await;
+        execute_statements(&pool, v5_migration_statements())
+            .await
+            .unwrap();
+        let mut statements = v6_migration_statements();
+        statements.push(SqlStatement {
+            sql: "INSERT INTO missing_table (id) VALUES (1)".into(),
+            params: vec![],
+            expected_rows_affected: None,
+        });
+
+        assert!(execute_statements(&pool, statements).await.is_err());
+
+        let revision_column_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('invoices') WHERE name = 'draft_revision'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(revision_column_count, 0);
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(version, 5);
     }
 }

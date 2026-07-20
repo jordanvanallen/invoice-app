@@ -148,4 +148,10 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE line_items ADD COLUMN mileage_approval_date TEXT NOT NULL DEFAULT ''`,
     ],
   },
+  {
+    version: 6,
+    statements: [
+      `ALTER TABLE invoices ADD COLUMN draft_revision INTEGER NOT NULL DEFAULT 0`,
+    ],
+  },
 ];

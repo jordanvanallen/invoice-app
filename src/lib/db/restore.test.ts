@@ -19,6 +19,15 @@ async function version4Db() {
   return db;
 }
 
+async function version5Db() {
+  const db = await createSqlJsDb();
+  for (const migration of MIGRATIONS.filter((entry) => entry.version <= 5)) {
+    for (const statement of migration.statements) await db.execute(statement);
+    await db.execute(`PRAGMA user_version = ${migration.version}`);
+  }
+  return db;
+}
+
 describe('validateBackup', () => {
   test('accepts a real Invoice Maker database and summarizes it', async () => {
     const db = await goodDb();
@@ -72,7 +81,7 @@ describe('validateBackup', () => {
     const old = await version4Db();
     expect((await validateBackup(old)).ok).toBe(true);
 
-    const malformed = await goodDb();
+    const malformed = await version5Db();
     await malformed.execute('DROP INDEX idx_approvers_name_key');
     const check = await validateBackup(malformed);
     expect(check.ok).toBe(false);
@@ -80,7 +89,7 @@ describe('validateBackup', () => {
   });
 
   test('rejects a v5 backup with a dangling approver reference', async () => {
-    const db = await goodDb();
+    const db = await version5Db();
     await db.execute('PRAGMA foreign_keys = OFF');
     await db.execute("INSERT INTO invoices (id, year, status) VALUES (1, 2026, 'draft')");
     await db.execute(
@@ -93,7 +102,7 @@ describe('validateBackup', () => {
   });
 
   test('rejects a v5 backup with a partial approver name-key index', async () => {
-    const db = await goodDb();
+    const db = await version5Db();
     await db.execute('DROP INDEX idx_approvers_name_key');
     await db.execute(
       'CREATE UNIQUE INDEX idx_approvers_name_key ON approvers(name_key) WHERE active = 1',
@@ -106,7 +115,7 @@ describe('validateBackup', () => {
   });
 
   test('rejects a v5 backup where the approver reference is one leg of a composite foreign key', async () => {
-    const db = await goodDb();
+    const db = await version5Db();
     await db.execute('PRAGMA foreign_keys = OFF');
     await db.execute('DROP TABLE line_items');
     await db.execute('CREATE UNIQUE INDEX idx_approvers_composite_fk ON approvers(id, name_key)');
@@ -119,6 +128,30 @@ describe('validateBackup', () => {
         REFERENCES approvers(id, name_key)
     )`);
     await db.execute('PRAGMA foreign_keys = ON');
+
+    const check = await validateBackup(db);
+
+    expect(check.ok).toBe(false);
+    expect(check.reason).toMatch(/missing expected data/i);
+  });
+
+  test('accepts genuine v5 without a revision but rejects v6 missing the revision column', async () => {
+    const db = await version5Db();
+    expect((await validateBackup(db)).ok).toBe(true);
+
+    await db.execute('PRAGMA user_version = 6');
+    const check = await validateBackup(db);
+
+    expect(check.ok).toBe(false);
+    expect(check.reason).toMatch(/missing expected data/i);
+  });
+
+  test('rejects v6 when the revision column has the wrong default', async () => {
+    const db = await version5Db();
+    await db.execute(
+      'ALTER TABLE invoices ADD COLUMN draft_revision INTEGER NOT NULL DEFAULT 1',
+    );
+    await db.execute('PRAGMA user_version = 6');
 
     const check = await validateBackup(db);
 

@@ -30,6 +30,13 @@ async function migrateThroughVersion4(db: Awaited<ReturnType<typeof createSqlJsD
   }
 }
 
+async function migrateThroughVersion5(db: Awaited<ReturnType<typeof createSqlJsDb>>) {
+  for (const migration of MIGRATIONS.filter((entry) => entry.version <= 5)) {
+    for (const statement of migration.statements) await db.execute(statement);
+    await db.execute(`PRAGMA user_version = ${migration.version}`);
+  }
+}
+
 async function migrateThroughVersion2(db: Awaited<ReturnType<typeof createSqlJsDb>>) {
   for (const migration of MIGRATIONS.filter((entry) => entry.version <= 2)) {
     for (const statement of migration.statements) await db.execute(statement);
@@ -41,7 +48,7 @@ describe('runMigrations', () => {
   test('creates all tables and sets user_version', async () => {
     const db = await createSqlJsDb();
     const version = await runMigrations(db);
-    expect(version).toBe(5);
+    expect(version).toBe(6);
     const names = await tableNames(db);
     for (const t of ['settings', 'clients', 'locations', 'year_counters', 'invoices', 'line_items']) {
       expect(names).toContain(t);
@@ -51,7 +58,7 @@ describe('runMigrations', () => {
     }
     expect(names).toContain('approvers');
     const uv = await db.select<{ user_version: number }>('PRAGMA user_version');
-    expect(uv[0].user_version).toBe(5);
+    expect(uv[0].user_version).toBe(6);
     const s = await db.select<{ id: number }>('SELECT id FROM settings');
     expect(s).toEqual([{ id: 1 }]);
     // v2 added the logo column
@@ -59,6 +66,12 @@ describe('runMigrations', () => {
     expect(cols.map((c) => c.name)).toContain('logo_data_url');
     const clientCols = await db.select<{ name: string }>("SELECT name FROM pragma_table_info('clients')");
     expect(clientCols.map((c) => c.name)).toContain('name_key');
+    const invoiceCols = await db.select<{
+      name: string; type: string; notnull: number; dflt_value: string | null;
+    }>("SELECT name, type, \"notnull\", dflt_value FROM pragma_table_info('invoices')");
+    expect(invoiceCols).toContainEqual({
+      name: 'draft_revision', type: 'INTEGER', notnull: 1, dflt_value: '0',
+    });
     const lineItemCols = await db.select<{ name: string }>(
       "SELECT name FROM pragma_table_info('line_items')",
     );
@@ -91,10 +104,13 @@ describe('runMigrations', () => {
                '2026-06-30', 'ABCD1234', 1250, 3800)`,
     );
 
-    await expect(runMigrations(db)).resolves.toBe(5);
+    await expect(runMigrations(db)).resolves.toBe(6);
 
     expect(await db.select('SELECT year, seq, issue_date FROM invoices')).toEqual([
       { year: 2026, seq: 9, issue_date: '2026-07-01' },
+    ]);
+    expect(await db.select('SELECT id, draft_revision FROM invoices')).toEqual([
+      { id: 1, draft_revision: 0 },
     ]);
     expect(await db.select(`SELECT invoice_id, position, inspection_number, mileage_cents,
       fee_cents, mileage_approver_id, mileage_approver_name, mileage_approval_date
@@ -108,6 +124,40 @@ describe('runMigrations', () => {
       mileage_approver_name: '',
       mileage_approval_date: '',
     }]);
+  });
+
+  test('migrates populated version-5 invoices to revision zero without changing data', async () => {
+    const db = await createSqlJsDb();
+    await migrateThroughVersion5(db);
+    await db.execute(
+      `INSERT INTO invoices
+         (id, year, seq, status, issue_date, period_start, period_end, total_cents)
+       VALUES (1, 2026, NULL, 'draft', '2026-07-20', '2026-07-13', '2026-07-19', 0)`,
+    );
+    await db.execute(
+      `INSERT INTO invoices
+         (id, year, seq, status, issue_date, period_start, period_end, total_cents)
+       VALUES (2, 2026, 8, 'finalized', '2026-07-13', '2026-07-06', '2026-07-12', 4294)`,
+    );
+
+    await expect(runMigrations(db)).resolves.toBe(6);
+
+    expect(await db.select(
+      `SELECT id, year, seq, status, issue_date, period_start, period_end,
+              total_cents, draft_revision
+         FROM invoices ORDER BY id`,
+    )).toEqual([
+      {
+        id: 1, year: 2026, seq: null, status: 'draft', issue_date: '2026-07-20',
+        period_start: '2026-07-13', period_end: '2026-07-19', total_cents: 0,
+        draft_revision: 0,
+      },
+      {
+        id: 2, year: 2026, seq: 8, status: 'finalized', issue_date: '2026-07-13',
+        period_start: '2026-07-06', period_end: '2026-07-12', total_cents: 4294,
+        draft_revision: 0,
+      },
+    ]);
   });
 
   test('backfills client name keys and enforces case-insensitive uniqueness', async () => {
@@ -137,7 +187,7 @@ describe('runMigrations', () => {
 
   test('runs on adapters that do not support raw transaction commands', async () => {
     const db = withoutSqlTransactions(await createSqlJsDb());
-    await expect(runMigrations(db)).resolves.toBe(5);
+    await expect(runMigrations(db)).resolves.toBe(6);
     const s = await db.select<{ id: number }>('SELECT id FROM settings');
     expect(s).toEqual([{ id: 1 }]);
   });
@@ -172,6 +222,6 @@ describe('runMigrations', () => {
     await runMigrations(db);
 
     expect(batches).toBe(MIGRATIONS.length);
-    expect((await inner.select<{ user_version: number }>('PRAGMA user_version'))[0].user_version).toBe(5);
+    expect((await inner.select<{ user_version: number }>('PRAGMA user_version'))[0].user_version).toBe(6);
   });
 });

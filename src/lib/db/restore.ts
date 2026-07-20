@@ -111,6 +111,19 @@ export async function validateBackup(db: Db): Promise<BackupCheck> {
       return { ok: false, reason: "This doesn't look like an Invoice Maker backup — it's missing expected data." };
     }
   }
+  if (schemaVersion >= 6) {
+    const invoiceColumns = await db.select<{
+      name: string; type: string; notnull: number; dflt_value: string | null;
+    }>("SELECT name, type, \"notnull\", dflt_value FROM pragma_table_info('invoices')");
+    const revisionColumn = invoiceColumns.find((column) => column.name === 'draft_revision');
+    if (
+      revisionColumn?.type !== 'INTEGER'
+      || revisionColumn.notnull !== 1
+      || revisionColumn.dflt_value !== '0'
+    ) {
+      return { ok: false, reason: "This doesn't look like an Invoice Maker backup — it's missing expected data." };
+    }
+  }
 
   // Content summary for the user to eyeball before committing.
   const set = await db.select<{ name: string }>('SELECT inspector_name AS name FROM settings WHERE id = 1');
