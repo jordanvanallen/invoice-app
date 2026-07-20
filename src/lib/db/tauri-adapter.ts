@@ -16,12 +16,13 @@ export async function createTauriDb(dbFile = 'sqlite:invoice.db'): Promise<Db & 
   const raw = await Database.load(dbFile);
   return {
     raw,
-    async executeTransaction(statements: DbStatement[]): Promise<void> {
-      await invoke('execute_sqlite_transaction', {
+    async executeTransaction(statements: DbStatement[]): Promise<DbResult[]> {
+      return invoke<DbResult[]>('execute_sqlite_transaction', {
         db: dbFile,
         statements: statements.map((statement) => ({
           sql: statement.sql,
           params: statement.params ?? [],
+          expectedRowsAffected: statement.expectedRowsAffected,
         })),
       });
     },

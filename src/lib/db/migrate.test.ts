@@ -115,11 +115,22 @@ describe('runMigrations', () => {
       select: inner.select.bind(inner),
       async executeTransaction(statements: DbStatement[]) {
         batches += 1;
+        const results: DbResult[] = [];
         await runInTransaction(inner, async () => {
           for (const statement of statements) {
-            await inner.execute(statement.sql, statement.params ?? []);
+            const result = await inner.execute(statement.sql, statement.params ?? []);
+            if (
+              statement.expectedRowsAffected !== undefined &&
+              result.rowsAffected !== statement.expectedRowsAffected
+            ) {
+              throw new Error(
+                `Expected ${statement.expectedRowsAffected} row(s) affected; affected ${result.rowsAffected}.`,
+              );
+            }
+            results.push(result);
           }
         });
+        return results;
       },
     };
 

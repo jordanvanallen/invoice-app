@@ -8,6 +8,7 @@ export interface DbResult {
 export interface DbStatement {
   sql: string;
   params?: unknown[];
+  expectedRowsAffected?: number;
 }
 
 /**
@@ -18,8 +19,19 @@ export interface DbStatement {
 export interface Db {
   execute(sql: string, params?: unknown[]): Promise<DbResult>;
   select<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
-  executeTransaction?(statements: DbStatement[]): Promise<void>;
+  executeTransaction?(statements: DbStatement[]): Promise<DbResult[]>;
   supportsSqlTransactions?: boolean;
+}
+
+function assertRowsAffected(statement: DbStatement, result: DbResult): void {
+  if (
+    statement.expectedRowsAffected !== undefined &&
+    result.rowsAffected !== statement.expectedRowsAffected
+  ) {
+    throw new Error(
+      `Expected ${statement.expectedRowsAffected} row(s) affected; affected ${result.rowsAffected}.`,
+    );
+  }
 }
 
 /**
@@ -29,24 +41,28 @@ export interface Db {
 export async function executeStatementsAtomically(
   db: Db,
   statements: readonly DbStatement[],
-): Promise<void> {
+): Promise<DbResult[]> {
   if (db.executeTransaction) {
-    await db.executeTransaction(statements.map((statement) => ({
+    return db.executeTransaction(statements.map((statement) => ({
       sql: statement.sql,
       params: [...(statement.params ?? [])],
+      expectedRowsAffected: statement.expectedRowsAffected,
     })));
-    return;
   }
 
   if (!db.supportsSqlTransactions) {
     throw new Error('This database adapter does not support atomic transactions.');
   }
 
+  const results: DbResult[] = [];
   await runInTransaction(db, async () => {
     for (const statement of statements) {
-      await db.execute(statement.sql, statement.params ?? []);
+      const result = await db.execute(statement.sql, statement.params ?? []);
+      assertRowsAffected(statement, result);
+      results.push(result);
     }
   });
+  return results;
 }
 
 export async function runInTransaction(db: Db, work: () => Promise<void>): Promise<void> {
