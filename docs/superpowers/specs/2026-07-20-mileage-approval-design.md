@@ -125,6 +125,8 @@ The editor uses these results for its blocked-row count, row warnings, jump-to-f
 
 After validation succeeds, sequence allocation or reservation, snapshot persistence, totals, finalization timestamp, and a conditional invoice update constrained by `status = 'draft'` form one single-connection transaction. The conditional update must affect exactly one invoice row; any other affected-row count throws inside the transaction. Any later failure rolls back the counter/reservation and every finalized-state column. The existing pre-finalization draft save may remain persisted. The current production `runInTransaction` callback fallback is not sufficient because the Tauri adapter does not expose callback transaction support; implementation must use or add a production-capable transaction primitive rather than relying on sequential callback writes.
 
+The completed implementation adds append-only migration 6 with `invoices.draft_revision INTEGER NOT NULL DEFAULT 0`. Each atomic draft save and catalog-driven draft detach increments this revision. Finalization compares the revision it loaded, so a stale save, catalog deletion, or torn draft read cannot commit an obsolete snapshot. Automatic numbering observes the current counter and assigned maximum, then reserves its candidate with an affected-row-checked counter compare-and-swap as the first statement in the same transaction as finalization. A counter conflict is retried only while the invoice is still the same draft revision; retries are bounded and the snapshot is rebuilt for the successful candidate. Manual numbering remains a monotonic reservation in that same atomic batch.
+
 Preview remains available for an incomplete mileage approval. Beneath each affected line it displays the non-evidentiary placeholder `Mileage approval required` until both values are valid; it never synthesizes a partial approval sentence. That placeholder is preview-only and cannot reach a finalized snapshot or persisted PDF.
 
 No additional temporal ordering rule is imposed on the approval date. It must be a real date, but it may precede or follow the inspection date because the business has not specified a tighter constraint.
@@ -143,10 +145,12 @@ The approval is supporting evidence, not a new billable line. It does not receiv
 
 ## Backup and Restore Compatibility
 
-Existing version 1–4 databases migrate to version 5 on normal startup. Backup validation must remain schema-version-aware:
+Existing version 1–4 databases migrate through version 5 to version 6 on normal startup. Backup validation remains schema-version-aware:
 
 - backups below version 5 are valid without `approvers` and migrate after restoration;
-- version 5 and newer backups must satisfy the mileage-approval schema fingerprint; and
+- version 5 and newer backups must satisfy the mileage-approval schema fingerprint;
+- a genuine version-5 backup must not already contain the version-6 `draft_revision` column; and
+- version-6 backups must contain `invoices.draft_revision` as `INTEGER NOT NULL DEFAULT 0`; and
 - a backup claiming version 5 with a partial or inconsistent schema is rejected as malformed.
 
 The existing base table checks remain valid for all versions. Add version-5 checks rather than adding `approvers` unconditionally to the base table list, which would incorrectly reject every older backup. The v5 fingerprint verifies through SQLite pragmas:
@@ -157,7 +161,7 @@ The existing base table checks remain valid for all versions. Add version-5 chec
 - the `mileage_approver_id` foreign key relationship; and
 - an empty `PRAGMA foreign_key_check` result so dangling approver references cannot pass validation.
 
-Pre-v5 backups retain the current permissive path and migrate only after the restored file is swapped into place.
+Pre-v5 backups retain the current permissive path and migrate only after the restored file is swapped into place. Genuine v5 backups are accepted and receive migration 6 after restoration; partial v6 shapes mislabeled as v5 are rejected before the live database is replaced.
 
 ## Error and Edge-Case Behavior
 

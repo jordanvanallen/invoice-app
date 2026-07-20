@@ -4,7 +4,7 @@
 
 **Goal:** Require a catalog-linked approver and valid date for every non-zero mileage charge, persist immutable approval evidence, and display it beneath the owning invoice line in previews, finalized views, and PDFs.
 
-**Architecture:** Add append-only SQLite migration 5, extend the existing line-item snapshot model, and introduce a shared pure finalization validator plus legacy-safe approval formatter. Extend the fixed-statement transaction bridge so production Tauri operations can enforce affected-row expectations inside one SQLx transaction; use that boundary for finalization, approver deletion, and duplication. Keep disclosure state editor-only while persisted approval fields flow through the existing draft/autosave/snapshot pipeline.
+**Architecture:** Add append-only SQLite migration 5 for approvers and line approval fields, followed by append-only migration 6 for optimistic draft revisions. Extend the existing line-item snapshot model and introduce a shared pure finalization validator plus legacy-safe approval formatter. Extend the fixed-statement transaction bridge so production Tauri operations can enforce affected-row expectations inside one SQLx transaction; use that boundary for draft saves, finalization, approver deletion, and duplication. Automatic numbering reserves its candidate with a counter compare-and-swap in the finalization transaction and retries bounded conflicts. Keep disclosure state editor-only while persisted approval fields flow through the existing draft/autosave/snapshot pipeline.
 
 **Tech Stack:** Svelte 5 runes, SvelteKit 2, TypeScript 5.6, Vitest 4, SQLite/sql.js, Tauri 2, Rust/SQLx 0.8, pdfmake 0.3.
 
@@ -12,6 +12,7 @@
 
 - Work only on `codex/mileage-approvals`, based from `dev` commit `57d2dc4`.
 - Migration 5 is append-only; never edit statements in migrations 1–4.
+- Migration 6 is append-only and adds only `invoices.draft_revision` for stale-write/finalization protection.
 - One mileage charge has exactly one approver and one approval date; no status workflow, notes, roles, signatures, attachments, or approval-events table.
 - The rule applies to completed and no-show lines only when `mileageCents > 0`.
 - Approved by must be linked to the Approvers catalog; free text alone never satisfies finalization.
@@ -208,6 +209,8 @@ git commit -m "Harden atomic database batches"
 
 ### Task 2: Migration 5, line-item types, and backup fingerprint
 
+> **Final implementation note:** Task 2's checkpoint ended at schema version 5. The persistence review in Task 5 added append-only migration 6, so the completed branch reports version 6 while retaining the exact version-5 approval schema described below.
+
 **Files:**
 - Modify: `src/lib/db/schema.ts`
 - Modify: `src/lib/db/migrate.test.ts`
@@ -352,7 +355,7 @@ In `src-tauri/src/database.rs`, create a v4-shaped SQLite database, call `execut
 
 Run: `npx vitest run src/lib/db/migrate.test.ts src/lib/db/restore.test.ts`
 
-Expected: PASS with schema version 5.
+Expected at this checkpoint: PASS with schema version 5. The completed branch advances to schema version 6 in Task 5's review hardening.
 
 Run: `npm run check`
 
