@@ -107,6 +107,14 @@ export async function deleteEntryIfUnused(db: Db, table: CatalogTable, id: numbe
   try {
     await executeStatementsAtomically(db, [
       {
+        sql: `UPDATE invoices SET draft_revision = draft_revision + 1
+               WHERE status = 'draft' AND EXISTS (
+                 SELECT 1 FROM line_items li
+                 WHERE li.invoice_id = invoices.id AND li.${column} = ?
+               )`,
+        params: [id],
+      },
+      {
         sql: `UPDATE line_items SET ${column} = NULL
                WHERE ${column} = ? AND invoice_id IN
                  (SELECT id FROM invoices WHERE status = 'draft')`,

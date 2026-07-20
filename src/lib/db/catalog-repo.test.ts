@@ -4,12 +4,24 @@ import { runMigrations } from './migrate';
 import {
   addEntry, listEntries, renameEntry, setActive, deleteEntryIfUnused,
 } from './catalog-repo';
+import type { CatalogTable } from './catalog-repo';
 
 async function freshDb() {
   const db = await createSqlJsDb();
   await runMigrations(db);
   return db;
 }
+
+const catalogReferenceCases = [
+  { table: 'clients', column: 'client_id', targetName: 'Draft Client', otherName: 'Other Client' },
+  { table: 'locations', column: 'location_id', targetName: 'Draft Location', otherName: 'Other Location' },
+  { table: 'approvers', column: 'mileage_approver_id', targetName: 'Draft Approver', otherName: 'Other Approver' },
+] as const satisfies readonly {
+  table: CatalogTable;
+  column: 'client_id' | 'location_id' | 'mileage_approver_id';
+  targetName: string;
+  otherName: string;
+}[];
 
 describe('catalog repo (clients/locations/approvers)', () => {
   test('add and list', async () => {
@@ -119,6 +131,46 @@ describe('catalog repo (clients/locations/approvers)', () => {
     expect(await listEntries(db, 'clients')).toEqual([]);
   });
 
+  test.each(catalogReferenceCases)(
+    '$table deletion increments each affected draft revision once without touching other invoice revisions',
+    async ({ table, column, targetName, otherName }) => {
+      const db = await freshDb();
+      const targetId = await addEntry(db, table, targetName);
+      const otherId = await addEntry(db, table, otherName);
+      await db.execute(`INSERT INTO invoices (id, year, status, draft_revision) VALUES
+        (1, 2026, 'draft', 4),
+        (2, 2026, 'draft', 8),
+        (3, 2026, 'finalized', 12),
+        (4, 2026, 'void', 16)`);
+      await db.execute(`INSERT INTO line_items (invoice_id, type, position, ${column}) VALUES
+        (1, 'completed', 0, ?),
+        (1, 'completed', 1, ?),
+        (2, 'completed', 0, ?),
+        (3, 'completed', 0, ?),
+        (4, 'completed', 0, ?)`, [targetId, targetId, otherId, otherId, otherId]);
+
+      expect(await deleteEntryIfUnused(db, table, targetId)).toBe(true);
+
+      expect(await db.select(
+        'SELECT id, draft_revision FROM invoices ORDER BY id',
+      )).toEqual([
+        { id: 1, draft_revision: 5 },
+        { id: 2, draft_revision: 8 },
+        { id: 3, draft_revision: 12 },
+        { id: 4, draft_revision: 16 },
+      ]);
+      expect(await db.select(
+        `SELECT invoice_id, ${column} AS reference_id FROM line_items ORDER BY invoice_id, position`,
+      )).toEqual([
+        { invoice_id: 1, reference_id: null },
+        { invoice_id: 1, reference_id: null },
+        { invoice_id: 2, reference_id: otherId },
+        { invoice_id: 3, reference_id: otherId },
+        { invoice_id: 4, reference_id: otherId },
+      ]);
+    },
+  );
+
   test('approver deletion detaches drafts but preserves their stored approver name', async () => {
     const db = await freshDb();
     const id = await addEntry(db, 'approvers', 'Jordan Lee');
@@ -157,10 +209,13 @@ describe('catalog repo (clients/locations/approvers)', () => {
   test('approver deletion rolls draft detachment back when deleting the catalog row fails', async () => {
     const db = await freshDb();
     const id = await addEntry(db, 'approvers', 'Jordan Lee');
-    await db.execute("INSERT INTO invoices (id, year, status) VALUES (1, 2026, 'draft')");
+    await db.execute("INSERT INTO invoices (id, year, status, draft_revision) VALUES (1, 2026, 'draft', 7)");
     await db.execute(
-      "INSERT INTO line_items (invoice_id, type, mileage_approver_id, mileage_approver_name) VALUES (1, 'completed', ?, 'Jordan Lee')",
-      [id],
+      `INSERT INTO line_items
+         (invoice_id, type, position, mileage_approver_id, mileage_approver_name)
+       VALUES (1, 'completed', 0, ?, 'Jordan Lee'),
+              (1, 'completed', 1, ?, 'Jordan Lee')`,
+      [id, id],
     );
     await db.execute(`CREATE TRIGGER fail_approver_delete
       BEFORE DELETE ON approvers
@@ -171,9 +226,14 @@ describe('catalog repo (clients/locations/approvers)', () => {
     await expect(deleteEntryIfUnused(db, 'approvers', id)).rejects.toThrow(
       /injected approver delete failure/i,
     );
-    expect(await db.select('SELECT mileage_approver_id FROM line_items')).toEqual([
+    expect(await db.select(
+      'SELECT mileage_approver_id FROM line_items ORDER BY position',
+    )).toEqual([
+      { mileage_approver_id: id },
       { mileage_approver_id: id },
     ]);
+    expect(await db.select('SELECT draft_revision FROM invoices WHERE id = 1'))
+      .toEqual([{ draft_revision: 7 }]);
     expect((await listEntries(db, 'approvers')).map((entry) => entry.id)).toEqual([id]);
   });
 });

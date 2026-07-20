@@ -1,7 +1,7 @@
 import { test, expect, describe } from 'vitest';
 import { createSqlJsDb } from './sqljs-adapter';
 import { runMigrations } from './migrate';
-import { addEntry, renameEntry, setActive } from './catalog-repo';
+import { addEntry, deleteEntryIfUnused, listEntries, renameEntry, setActive } from './catalog-repo';
 import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, finalizeInvoice, reprintSnapshot, listYears, listInvoicesForYear, yearRollup, latestDraftId, duplicateInvoice, yearClientBreakdown, rangeRollup, rangeClientBreakdown, peekNextSeq, voidInvoice, listVoided, unvoidInvoice, searchInvoices, loadBilledHistory, getInvoiceStatus, deleteVoidedInvoice } from './invoice-repo';
 import { allocateSeq } from './numbering-repo';
 import { getSettings, saveSettings } from './settings-repo';
@@ -328,6 +328,60 @@ describe('finalize + reprint', () => {
 
     expect(saveInjected).toBe(true);
     expect(await loadDraft(db, id)).toEqual({ seq: null, ...latestDraft });
+    expect(await db.select('SELECT draft_revision FROM invoices WHERE id = ?', [id]))
+      .toEqual([{ draft_revision: 2 }]);
+    expect(await db.select('SELECT * FROM year_counters')).toEqual([]);
+    expect(await db.select(
+      'SELECT status, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json FROM invoices WHERE id = ?',
+      [id],
+    )).toEqual([{
+      status: 'draft', finalized_at: null, subtotal_cents: 0,
+      tax_cents: 0, total_cents: 0, snapshot_json: null,
+    }]);
+  });
+
+  test('rejects a stale finalization when approver deletion invalidates its loaded draft', async () => {
+    const db = await freshDb();
+    const approverId = await addEntry(db, 'approvers', 'Jordan Lee');
+    const id = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    await saveDraft(db, id, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line({
+        mileageCents: 1800,
+        mileageApproverId: approverId,
+        mileageApproverName: 'Jordan Lee',
+        mileageApprovalDate: '2026-07-18',
+      })],
+    });
+    let deletionInjected = false;
+    const racingDb: Db = {
+      execute: (sql, params) => db.execute(sql, params),
+      select: db.select.bind(db),
+      executeTransaction: async (statements) => {
+        if (!deletionInjected && statements.some((statement) => statement.sql.includes("status = 'finalized'"))) {
+          deletionInjected = true;
+          expect(await deleteEntryIfUnused(db, 'approvers', approverId)).toBe(true);
+        }
+        return executeStatementsAtomically(db, statements);
+      },
+    };
+
+    await expect(finalizeInvoice(racingDb, id)).rejects.toThrow(/expected 1 row.*affected 0/i);
+
+    expect(deletionInjected).toBe(true);
+    expect(await listEntries(db, 'approvers')).toEqual([]);
+    expect(await db.select(
+      `SELECT mileage_approver_id, mileage_approver_name
+         FROM line_items WHERE invoice_id = ?`,
+      [id],
+    )).toEqual([{
+      mileage_approver_id: null,
+      mileage_approver_name: 'Jordan Lee',
+    }]);
     expect(await db.select('SELECT draft_revision FROM invoices WHERE id = ?', [id]))
       .toEqual([{ draft_revision: 2 }]);
     expect(await db.select('SELECT * FROM year_counters')).toEqual([]);
