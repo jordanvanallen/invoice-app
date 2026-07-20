@@ -1,11 +1,12 @@
 import type { Db } from './db';
-import { runInTransaction } from './db';
+import { executeStatementsAtomically, runInTransaction } from './db';
 import type { DraftInvoice, LineItem, FinalizedSnapshot } from '../types';
 import { orderInvoiceLines } from '../lineOrder';
 import { buildFinalizedSnapshot } from '../snapshot';
 import { checkOverride } from '../numbering';
+import { invoiceFinalizeBlockers } from '../validation';
 import { getSettings } from './settings-repo';
-import { allocateSeq, reserveSeq, takenSeqs } from './numbering-repo';
+import { takenSeqs } from './numbering-repo';
 
 export interface DraftHeader {
   year: number;
@@ -37,7 +38,8 @@ interface LineRow {
   vin8: string;
   mileage_cents: number;
   mileage_approver_id: number | null;
-  mileage_approver_name: string;
+  stored_approver_name: string;
+  live_approver_name: string | null;
   mileage_approval_date: string;
   fee_cents: number;
 }
@@ -52,10 +54,12 @@ export async function loadDraft(db: Db, invoiceId: number): Promise<DraftInvoice
             li.client_id, li.client_name AS stored_client_name, c.name AS live_client_name,
             li.location_id, li.location AS stored_location, loc.name AS live_location,
             li.date, li.vin8, li.mileage_cents, li.mileage_approver_id,
-            li.mileage_approver_name, li.mileage_approval_date, li.fee_cents
+            li.mileage_approver_name AS stored_approver_name,
+            a.name AS live_approver_name, li.mileage_approval_date, li.fee_cents
        FROM line_items li
        LEFT JOIN clients c ON c.id = li.client_id
        LEFT JOIN locations loc ON loc.id = li.location_id
+       LEFT JOIN approvers a ON a.id = li.mileage_approver_id
       WHERE li.invoice_id = ?
       ORDER BY li.position`,
     [invoiceId],
@@ -73,7 +77,7 @@ export async function loadDraft(db: Db, invoiceId: number): Promise<DraftInvoice
     vin8: r.vin8,
     mileageCents: r.mileage_cents,
     mileageApproverId: r.mileage_approver_id ?? null,
-    mileageApproverName: r.mileage_approver_name ?? '',
+    mileageApproverName: r.live_approver_name ?? r.stored_approver_name,
     mileageApprovalDate: r.mileage_approval_date ?? '',
     feeCents: r.fee_cents,
   }));
@@ -114,10 +118,12 @@ export async function saveDraft(
       await db.execute(
         `INSERT INTO line_items
            (invoice_id, type, position, inspection_number, client_id, client_name,
-            location_id, location, date, vin8, mileage_cents, fee_cents)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            location_id, location, date, vin8, mileage_cents, fee_cents,
+            mileage_approver_id, mileage_approver_name, mileage_approval_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [invoiceId, l.type, l.position, l.inspectionNumber, l.clientId, l.clientName,
-         l.locationId, l.location, l.date, l.vin8, l.mileageCents, l.feeCents],
+         l.locationId, l.location, l.date, l.vin8, l.mileageCents, l.feeCents,
+         l.mileageApproverId, l.mileageApproverName, l.mileageApprovalDate],
       );
     }
   });
@@ -140,11 +146,6 @@ function validateSeqResult(seq: number, taken: number[]): void {
   if (!result.ok) throw new Error(result.message);
 }
 
-async function finalizeSelectedSeq(db: Db, invoiceId: number, year: number, seq: number): Promise<number> {
-  validateSeqResult(seq, await takenSeqs(db, year, invoiceId));
-  return reserveSeq(db, year, seq);
-}
-
 /**
  * Finalize a draft: allocate its seq, freeze the full snapshot + totals, set
  * status. One transaction. Returns the snapshot.
@@ -152,27 +153,44 @@ async function finalizeSelectedSeq(db: Db, invoiceId: number, year: number, seq:
 export async function finalizeInvoice(db: Db, invoiceId: number): Promise<FinalizedSnapshot> {
   const draft = await loadDraft(db, invoiceId);
   const normalizedDraft = { ...draft, year: deriveInvoiceYear(draft.issueDate, draft.year) };
-  const settings = await getSettings(db);
+  const blockers = invoiceFinalizeBlockers(normalizedDraft);
+  if (blockers.length) throw new Error(blockers[0].message);
 
-  let snapshot: FinalizedSnapshot | null = null;
-  await runInTransaction(db, async () => {
-    const seq = normalizedDraft.seq === null
-      ? await allocateSeq(db, normalizedDraft.year)
-      : await finalizeSelectedSeq(db, invoiceId, normalizedDraft.year, normalizedDraft.seq);
-    snapshot = buildFinalizedSnapshot(normalizedDraft, settings, seq);
-    await db.execute(
+  const settings = await getSettings(db);
+  const seq = normalizedDraft.seq === null
+    ? await peekNextSeq(db, normalizedDraft.year, invoiceId)
+    : normalizedDraft.seq;
+  if (normalizedDraft.seq !== null) {
+    validateSeqResult(seq, await takenSeqs(db, normalizedDraft.year, invoiceId));
+  }
+  const snapshot = buildFinalizedSnapshot(normalizedDraft, settings, seq);
+
+  await executeStatementsAtomically(db, [
+    {
+      sql: `INSERT INTO year_counters (year, last_seq) VALUES (?, ?)
+            ON CONFLICT(year) DO UPDATE SET last_seq =
+              CASE WHEN last_seq < excluded.last_seq THEN excluded.last_seq ELSE last_seq END`,
+      params: [normalizedDraft.year, seq],
+    },
+    {
+      sql:
       `UPDATE invoices SET
-         seq = ?, year = ?, status = 'finalized', finalized_at = ?,
-         subtotal_cents = ?, tax_cents = ?, total_cents = ?, snapshot_json = ?
-       WHERE id = ?`,
-      [
+              seq = ?, year = ?, status = 'finalized', finalized_at = ?,
+              subtotal_cents = ?, tax_cents = ?, total_cents = ?, snapshot_json = ?
+            WHERE id = ? AND status = 'draft'
+              AND NOT EXISTS (
+                SELECT 1 FROM invoices other
+                WHERE other.year = ? AND other.seq = ? AND other.id != ?
+              )`,
+      params: [
         seq, normalizedDraft.year, snapshot.issueDate,
         snapshot.totals.subtotalCents, snapshot.totals.taxCents, snapshot.totals.totalCents,
         JSON.stringify(snapshot), invoiceId,
+        normalizedDraft.year, seq, invoiceId,
       ],
-    );
-  });
-  if (!snapshot) throw new Error(`Invoice ${invoiceId} could not be finalized.`);
+      expectedRowsAffected: 1,
+    },
+  ]);
   return snapshot;
 }
 
@@ -298,12 +316,38 @@ export async function latestDraftId(db: Db): Promise<number | null> {
 /** Copy an invoice's line items into a brand-new draft (new dates). Returns the draft id. */
 export async function duplicateInvoice(db: Db, sourceId: number, header: DraftHeader): Promise<number> {
   const src = await loadDraft(db, sourceId);
-  const id = await createDraft(db, header);
-  await saveDraft(db, id, {
-    year: header.year, issueDate: header.issueDate,
-    periodStart: header.periodStart, periodEnd: header.periodEnd,
-    lines: src.lines.map((l, i) => ({ ...l, position: i })),
-  });
+  const [{ id }] = await db.select<{ id: number }>(
+    'SELECT COALESCE(MAX(id), 0) + 1 AS id FROM invoices',
+  );
+  const copied = src.lines.map((line, position) => ({
+    ...line,
+    position,
+    mileageApproverId: null,
+    mileageApproverName: '',
+    mileageApprovalDate: '',
+  }));
+  await executeStatementsAtomically(db, [
+    {
+      sql: `INSERT INTO invoices
+              (id, year, status, issue_date, period_start, period_end)
+            VALUES (?, ?, 'draft', ?, ?, ?)`,
+      params: [id, header.year, header.issueDate, header.periodStart, header.periodEnd],
+      expectedRowsAffected: 1,
+    },
+    ...copied.map((line) => ({
+      sql: `INSERT INTO line_items
+              (invoice_id, type, position, inspection_number, client_id, client_name,
+               location_id, location, date, vin8, mileage_cents, fee_cents,
+               mileage_approver_id, mileage_approver_name, mileage_approval_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [
+        id, line.type, line.position, line.inspectionNumber, line.clientId, line.clientName,
+        line.locationId, line.location, line.date, line.vin8, line.mileageCents, line.feeCents,
+        line.mileageApproverId, line.mileageApproverName, line.mileageApprovalDate,
+      ],
+      expectedRowsAffected: 1,
+    })),
+  ]);
   return id;
 }
 

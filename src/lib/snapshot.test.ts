@@ -64,6 +64,28 @@ describe('buildFinalizedSnapshot', () => {
     expect(fresh.totals.subtotalCents).toBe(3800);
   });
 
+  test('deep-copies mileage approval details into the snapshot', () => {
+    const source = draft();
+    source.lines[0] = {
+      ...source.lines[0],
+      mileageCents: 1800,
+      mileageApproverId: 7,
+      mileageApproverName: 'Jordan Lee',
+      mileageApprovalDate: '2026-05-20',
+    };
+
+    const snap = buildFinalizedSnapshot(source, settings(), 8);
+    source.lines[0].mileageApproverId = 9;
+    source.lines[0].mileageApproverName = 'Jordan A. Lee';
+    source.lines[0].mileageApprovalDate = '2026-05-21';
+
+    expect(snap.lines[0]).toMatchObject({
+      mileageApproverId: 7,
+      mileageApproverName: 'Jordan Lee',
+      mileageApprovalDate: '2026-05-20',
+    });
+  });
+
   test('orders each invoice section by date without mutating the draft', () => {
     const source = draft();
     source.lines = [

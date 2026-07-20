@@ -1,12 +1,12 @@
 import { test, expect, describe } from 'vitest';
 import { createSqlJsDb } from './sqljs-adapter';
 import { runMigrations } from './migrate';
-import { addEntry } from './catalog-repo';
+import { addEntry, renameEntry, setActive } from './catalog-repo';
 import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, finalizeInvoice, reprintSnapshot, listYears, listInvoicesForYear, yearRollup, latestDraftId, duplicateInvoice, yearClientBreakdown, rangeRollup, rangeClientBreakdown, peekNextSeq, voidInvoice, listVoided, unvoidInvoice, searchInvoices, loadBilledHistory, getInvoiceStatus, deleteVoidedInvoice } from './invoice-repo';
 import { allocateSeq } from './numbering-repo';
 import { getSettings, saveSettings } from './settings-repo';
 import type { LineItem } from '../types';
-import type { Db, DbResult } from './db';
+import { executeStatementsAtomically, type Db, type DbResult } from './db';
 
 async function freshDb() {
   const db = await createSqlJsDb();
@@ -23,6 +23,7 @@ function withoutSqlTransactions(db: Db): Db {
       return db.execute(sql, params);
     },
     select: db.select.bind(db),
+    executeTransaction: (statements) => executeStatementsAtomically(db, statements),
   };
 }
 
@@ -123,6 +124,29 @@ describe('invoice draft repo', () => {
     const draft = await loadDraft(db, id);
     expect(draft.lines[0].clientName).toBe('Globex Finance Group');
   });
+
+  test('round-trips a linked approval and resolves an approver rename in a draft', async () => {
+    const db = await freshDb();
+    const approverId = await addEntry(db, 'approvers', 'Jordan Lee');
+    const id = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    await saveDraft(db, id, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line({
+        mileageCents: 1800, mileageApproverId: approverId,
+        mileageApproverName: 'Jordan Lee', mileageApprovalDate: '2026-07-18',
+      })],
+    });
+    await renameEntry(db, 'approvers', approverId, 'Jordan A. Lee');
+    expect((await loadDraft(db, id)).lines[0]).toMatchObject({
+      mileageApproverId: approverId,
+      mileageApproverName: 'Jordan A. Lee',
+      mileageApprovalDate: '2026-07-18',
+    });
+  });
 });
 
 describe('finalize + reprint', () => {
@@ -143,6 +167,79 @@ describe('finalize + reprint', () => {
     expect(row.status).toBe('finalized');
     expect(row.seq).toBe(1);
     expect(row.total_cents).toBe(4294);
+  });
+
+  test.each([
+    { sequenceKind: 'automatic', seq: null },
+    { sequenceKind: 'manual', seq: 9 },
+  ])('rejects an invalid approval before $sequenceKind sequence mutation', async ({ seq }) => {
+    const db = await freshDb();
+    const id = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    await saveDraft(db, id, {
+      seq,
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line({
+        mileageCents: 1800,
+        mileageApproverId: null,
+        mileageApproverName: 'Jordan Lee',
+        mileageApprovalDate: '2026-07-18',
+      })],
+    });
+
+    await expect(finalizeInvoice(db, id)).rejects.toThrow(/saved approver/i);
+    expect(await db.select('SELECT * FROM year_counters')).toEqual([]);
+    expect(await db.select(
+      'SELECT status, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json FROM invoices WHERE id = ?',
+      [id],
+    )).toEqual([{
+      status: 'draft', finalized_at: null, subtotal_cents: 0,
+      tax_cents: 0, total_cents: 0, snapshot_json: null,
+    }]);
+  });
+
+  test('rolls back counter, status, timestamp, totals, and snapshot when the conditional update fails', async () => {
+    const db = await freshDb();
+    const id = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    await saveDraft(db, id, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line()],
+    });
+    let raceInjected = false;
+    const failingDb: Db = {
+      supportsSqlTransactions: true,
+      select: async <T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> => {
+        const rows = await db.select<T>(sql, params);
+        if (!raceInjected && sql.includes('SELECT MAX(seq) AS max_seq FROM invoices')) {
+          raceInjected = true;
+          await db.execute(
+            `INSERT INTO invoices
+               (year, seq, status, issue_date, period_start, period_end)
+             VALUES (2026, 1, 'finalized', '2026-07-20', '2026-07-13', '2026-07-19')`,
+          );
+        }
+        return rows;
+      },
+      execute: (sql, params) => db.execute(sql, params),
+    };
+
+    await expect(finalizeInvoice(failingDb, id)).rejects.toThrow(/expected 1 row.*affected 0/i);
+
+    expect(await db.select('SELECT * FROM year_counters')).toEqual([]);
+    expect(await db.select(
+      'SELECT status, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json FROM invoices WHERE id = ?',
+      [id],
+    )).toEqual([{
+      status: 'draft', finalized_at: null, subtotal_cents: 0,
+      tax_cents: 0, total_cents: 0, snapshot_json: null,
+    }]);
   });
 
   test('finalize stores a date-ordered snapshot that reprints identically', async () => {
@@ -306,6 +403,41 @@ describe('finalize + reprint', () => {
     expect(reprinted.lines[0].clientName).toBe('Globex Finance Grp'); // frozen as issued
     expect(reprinted.totals.totalCents).toBe(4294);
   });
+
+  test('reprint retains the finalized approver after catalog rename and deactivation', async () => {
+    const db = await freshDb();
+    const approverId = await addEntry(db, 'approvers', 'Jordan Lee');
+    const id = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    await saveDraft(db, id, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line({
+        mileageCents: 1800,
+        mileageApproverId: approverId,
+        mileageApproverName: 'Jordan Lee',
+        mileageApprovalDate: '2026-07-18',
+      })],
+    });
+
+    const finalized = await finalizeInvoice(db, id);
+    await renameEntry(db, 'approvers', approverId, 'Jordan A. Lee');
+    await setActive(db, 'approvers', approverId, false);
+    const reprinted = await reprintSnapshot(db, id);
+
+    expect(finalized.lines[0]).toMatchObject({
+      mileageApproverId: approverId,
+      mileageApproverName: 'Jordan Lee',
+      mileageApprovalDate: '2026-07-18',
+    });
+    expect(reprinted.lines[0]).toMatchObject({
+      mileageApproverId: approverId,
+      mileageApproverName: 'Jordan Lee',
+      mileageApprovalDate: '2026-07-18',
+    });
+  });
 });
 
 describe('by-year views', () => {
@@ -365,6 +497,11 @@ describe('latestDraftId', () => {
     const b = await createDraft(db, { year: 2026, issueDate: '2026-06-04', periodStart: '2026-05-28', periodEnd: '2026-06-03' });
     expect(await latestDraftId(db)).toBe(b);
     // finalizing the newest leaves the older draft as the latest remaining draft
+    await saveDraft(db, b, {
+      year: 2026, issueDate: '2026-06-04',
+      periodStart: '2026-05-28', periodEnd: '2026-06-03',
+      lines: [line()],
+    });
     await finalizeInvoice(db, b);
     expect(await latestDraftId(db)).toBe(a);
   });
@@ -388,6 +525,95 @@ describe('duplicateInvoice', () => {
     const [row] = await db.select<{ status: string }>('SELECT status FROM invoices WHERE id = ?', [dupId]);
     expect(row.status).toBe('draft');
   });
+
+  test('clears every approval field for each line and source state', async () => {
+    for (const sourceStatus of ['draft', 'finalized', 'void'] as const) {
+      const db = await freshDb();
+      const approverId = await addEntry(db, 'approvers', 'Jordan Lee');
+      const sourceId = await createDraft(db, {
+        year: 2026, issueDate: '2026-07-20',
+        periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      });
+      const approved = {
+        mileageApproverId: approverId,
+        mileageApproverName: 'Jordan Lee',
+        mileageApprovalDate: '2026-07-18',
+      };
+      await saveDraft(db, sourceId, {
+        year: 2026, issueDate: '2026-07-20',
+        periodStart: '2026-07-13', periodEnd: '2026-07-19',
+        lines: [
+          line({ position: 0, type: 'completed', inspectionNumber: '10000001', vin8: 'VIN00001', mileageCents: 1800, ...approved }),
+          line({ position: 1, type: 'completed', inspectionNumber: '10000002', vin8: 'VIN00002', mileageCents: 0, ...approved }),
+          line({ position: 2, type: 'noshow', inspectionNumber: '10000003', vin8: 'VIN00003', mileageCents: 1800, ...approved }),
+          line({ position: 3, type: 'noshow', inspectionNumber: '10000004', vin8: 'VIN00004', mileageCents: 0, ...approved }),
+        ],
+      });
+      if (sourceStatus !== 'draft') await finalizeInvoice(db, sourceId);
+      if (sourceStatus === 'void') await voidInvoice(db, sourceId);
+      expect((await loadDraft(db, sourceId)).lines.map((row) => ({
+        id: row.mileageApproverId,
+        name: row.mileageApproverName,
+        date: row.mileageApprovalDate,
+      })), sourceStatus).toEqual(Array.from({ length: 4 }, () => ({
+        id: approverId,
+        name: 'Jordan Lee',
+        date: '2026-07-18',
+      })));
+
+      const duplicateId = await duplicateInvoice(db, sourceId, {
+        year: 2026, issueDate: '2026-07-27',
+        periodStart: '2026-07-20', periodEnd: '2026-07-26',
+      });
+
+      expect((await loadDraft(db, duplicateId)).lines.map((row) => ({
+        type: row.type,
+        mileageCents: row.mileageCents,
+        id: row.mileageApproverId,
+        name: row.mileageApproverName,
+        date: row.mileageApprovalDate,
+      })), sourceStatus).toEqual([
+        { type: 'completed', mileageCents: 1800, id: null, name: '', date: '' },
+        { type: 'completed', mileageCents: 0, id: null, name: '', date: '' },
+        { type: 'noshow', mileageCents: 1800, id: null, name: '', date: '' },
+        { type: 'noshow', mileageCents: 0, id: null, name: '', date: '' },
+      ]);
+    }
+  });
+
+  test('rolls back the destination invoice when copying a line fails', async () => {
+    const db = await freshDb();
+    const sourceId = await createDraft(db, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+    });
+    await saveDraft(db, sourceId, {
+      year: 2026, issueDate: '2026-07-20',
+      periodStart: '2026-07-13', periodEnd: '2026-07-19',
+      lines: [line({ position: 0 }), line({ position: 1, inspectionNumber: '87654321' })],
+    });
+    const invoicesBefore = await db.select('SELECT * FROM invoices ORDER BY id');
+    let lineInserts = 0;
+    const failingDb: Db = {
+      supportsSqlTransactions: true,
+      select: (sql, params) => db.select(sql, params),
+      execute: (sql, params) => {
+        if (/^\s*INSERT INTO line_items\b/.test(sql) && ++lineInserts === 2) {
+          throw new Error('simulated line copy failure');
+        }
+        return db.execute(sql, params);
+      },
+    };
+
+    await expect(duplicateInvoice(failingDb, sourceId, {
+      year: 2026, issueDate: '2026-07-27',
+      periodStart: '2026-07-20', periodEnd: '2026-07-26',
+    })).rejects.toThrow('simulated line copy failure');
+
+    expect(await db.select('SELECT * FROM invoices ORDER BY id')).toEqual(invoicesBefore);
+    expect(await db.select('SELECT invoice_id, COUNT(*) AS count FROM line_items GROUP BY invoice_id'))
+      .toEqual([{ invoice_id: sourceId, count: 2 }]);
+  });
 });
 
 describe('yearClientBreakdown', () => {
@@ -395,6 +621,7 @@ describe('yearClientBreakdown', () => {
     const db = await freshDb();
     const gm = await addEntry(db, 'clients', 'Globex Finance');
     const honda = await addEntry(db, 'clients', 'Summit Motors');
+    const approverId = await addEntry(db, 'approvers', 'Jordan Lee');
     async function inv(issueDate: string, lines: LineItem[]) {
       const id = await createDraft(db, { year: 2026, issueDate, periodStart: issueDate, periodEnd: issueDate });
       await saveDraft(db, id, { year: 2026, issueDate, periodStart: issueDate, periodEnd: issueDate, lines });
@@ -402,7 +629,11 @@ describe('yearClientBreakdown', () => {
     }
     await inv('2026-05-28', [
       line({ clientId: gm, clientName: 'Globex Finance', feeCents: 3800 }),
-      line({ clientId: gm, clientName: 'Globex Finance', feeCents: 3800, mileageCents: 200 }),
+      line({
+        clientId: gm, clientName: 'Globex Finance', feeCents: 3800, mileageCents: 200,
+        mileageApproverId: approverId, mileageApproverName: 'Jordan Lee',
+        mileageApprovalDate: '2026-05-27',
+      }),
     ]);
     await inv('2026-06-10', [line({ clientId: honda, clientName: 'Summit Motors', feeCents: 3800 })]);
 
