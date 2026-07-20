@@ -5,6 +5,7 @@
 <CatalogManager
   table="locations"
   title="Locations"
+  noun="location"
   helper="The places you do inspections."
   addLabel="Add a location (e.g. Springvale)"
   examples="Springvale, Lakeside, Fairview, Glenwood" />

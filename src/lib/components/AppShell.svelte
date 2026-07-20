@@ -10,6 +10,7 @@
     { href: '/expense-history', label: 'Expense History' },
     { href: '/clients', label: 'Clients' },
     { href: '/locations', label: 'Locations' },
+    { href: '/approvers', label: 'Approvers' },
     { href: '/backups', label: 'Backups' },
     { href: '/settings', label: 'Settings' },
   ];

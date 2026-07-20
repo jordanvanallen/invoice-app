@@ -5,6 +5,7 @@
 <CatalogManager
   table="clients"
   title="Clients"
+  noun="client"
   helper="The finance companies you inspect for."
   addLabel="Add a client (e.g. Globex Finance Group)"
   examples="Globex Finance, Summit Motors, Northbridge Credit" />

@@ -7,9 +7,15 @@ export async function loadClients(): Promise<CatalogEntry[]> {
 export async function loadLocations(): Promise<CatalogEntry[]> {
   return listEntries(await getDb(), 'locations', { activeOnly: true });
 }
+export async function loadApprovers(): Promise<CatalogEntry[]> {
+  return listEntries(await getDb(), 'approvers', { activeOnly: true });
+}
 export async function addClient(name: string): Promise<number> {
   return addEntry(await getDb(), 'clients', name);
 }
 export async function addLocation(name: string): Promise<number> {
   return addEntry(await getDb(), 'locations', name);
+}
+export async function addApprover(name: string): Promise<number> {
+  return addEntry(await getDb(), 'approvers', name);
 }

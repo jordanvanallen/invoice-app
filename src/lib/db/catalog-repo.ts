@@ -1,6 +1,16 @@
-import type { Db } from './db';
+import { executeStatementsAtomically, type Db } from './db';
 
-export type CatalogTable = 'clients' | 'locations';
+export type CatalogTable = 'clients' | 'locations' | 'approvers';
+
+const CATALOGS = {
+  clients: { referenceColumn: 'client_id', normalized: true, noun: 'client' },
+  locations: { referenceColumn: 'location_id', normalized: false, noun: 'location' },
+  approvers: { referenceColumn: 'mileage_approver_id', normalized: true, noun: 'approver' },
+} as const satisfies Record<CatalogTable, {
+  referenceColumn: string;
+  normalized: boolean;
+  noun: string;
+}>;
 
 export interface CatalogEntry {
   id: number;
@@ -22,19 +32,19 @@ export async function addEntry(db: Db, table: CatalogTable, name: string): Promi
   const trimmed = name.trim();
   if (!trimmed) throw new Error('Name is required.');
 
-  if (table === 'clients') {
+  if (CATALOGS[table].normalized) {
     const key = nameKey(trimmed);
     const [existing] = await db.select<{ id: number; active: number }>(
-      'SELECT id, active FROM clients WHERE name_key = ?',
+      `SELECT id, active FROM ${table} WHERE name_key = ?`,
       [key],
     );
     if (existing) {
       if (existing.active !== 1) {
-        await db.execute('UPDATE clients SET active = 1 WHERE id = ?', [existing.id]);
+        await db.execute(`UPDATE ${table} SET active = 1 WHERE id = ?`, [existing.id]);
       }
       return existing.id;
     }
-    const r = await db.execute('INSERT INTO clients (name, name_key) VALUES (?, ?)', [trimmed, key]);
+    const r = await db.execute(`INSERT INTO ${table} (name, name_key) VALUES (?, ?)`, [trimmed, key]);
     return r.lastInsertId as number;
   }
 
@@ -56,14 +66,15 @@ export async function renameEntry(db: Db, table: CatalogTable, id: number, name:
   const trimmed = name.trim();
   if (!trimmed) throw new Error('Name is required.');
 
-  if (table === 'clients') {
+  const catalog = CATALOGS[table];
+  if (catalog.normalized) {
     const key = nameKey(trimmed);
     const [existing] = await db.select<{ id: number }>(
-      'SELECT id FROM clients WHERE name_key = ? AND id != ?',
+      `SELECT id FROM ${table} WHERE name_key = ? AND id != ?`,
       [key, id],
     );
-    if (existing) throw new Error(`A client named "${trimmed}" already exists.`);
-    await db.execute('UPDATE clients SET name = ?, name_key = ? WHERE id = ?', [trimmed, key, id]);
+    if (existing) throw new Error(`A ${catalog.noun} named "${trimmed}" already exists.`);
+    await db.execute(`UPDATE ${table} SET name = ?, name_key = ? WHERE id = ?`, [trimmed, key, id]);
     return;
   }
 
@@ -75,23 +86,45 @@ export async function setActive(db: Db, table: CatalogTable, id: number, active:
 }
 
 /**
- * Delete an entry only if no FINALIZED or cancelled invoice references it. Draft
+ * Delete an entry only if no finalized or void invoice references it. Draft
  * invoices are scratch and don't block deletion (a draft keeps its stored name
  * text if the entry is gone). Returns false (and does nothing) when it's locked by
  * a real invoice — callers should deactivate instead.
  */
 export async function deleteEntryIfUnused(db: Db, table: CatalogTable, id: number): Promise<boolean> {
-  const column = table === 'clients' ? 'client_id' : 'location_id';
-  const [{ c }] = await db.select<{ c: number }>(
-    `SELECT COUNT(*) AS c
-       FROM line_items li JOIN invoices i ON i.id = li.invoice_id
-      WHERE li.${column} = ? AND i.status != 'draft'`,
-    [id],
-  );
-  if (c > 0) return false;
-  // Only draft rows can still reference it now — detach them (keeping their stored
-  // name text) so the foreign key doesn't block the delete.
-  await db.execute(`UPDATE line_items SET ${column} = NULL WHERE ${column} = ?`, [id]);
-  await db.execute(`DELETE FROM ${table} WHERE id = ?`, [id]);
-  return true;
+  const column = CATALOGS[table].referenceColumn;
+  const countNonDraftReferences = async (): Promise<number> => {
+    const [{ c }] = await db.select<{ c: number }>(
+      `SELECT COUNT(*) AS c
+         FROM line_items li JOIN invoices i ON i.id = li.invoice_id
+        WHERE li.${column} = ? AND i.status != 'draft'`,
+      [id],
+    );
+    return c;
+  };
+
+  if (await countNonDraftReferences() > 0) return false;
+
+  try {
+    await executeStatementsAtomically(db, [
+      {
+        sql: `UPDATE line_items SET ${column} = NULL
+               WHERE ${column} = ? AND invoice_id IN
+                 (SELECT id FROM invoices WHERE status = 'draft')`,
+        params: [id],
+      },
+      {
+        sql: `DELETE FROM ${table} WHERE id = ? AND NOT EXISTS (
+                SELECT 1 FROM line_items li JOIN invoices i ON i.id = li.invoice_id
+                WHERE li.${column} = ? AND i.status != 'draft'
+              )`,
+        params: [id, id],
+        expectedRowsAffected: 1,
+      },
+    ]);
+    return true;
+  } catch (error) {
+    if (await countNonDraftReferences() > 0) return false;
+    throw error;
+  }
 }

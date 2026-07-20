@@ -4,8 +4,16 @@
   import { listEntries, addEntry, renameEntry, setActive, deleteEntryIfUnused, type CatalogTable, type CatalogEntry } from '$lib/db/catalog-repo';
   import BigButton from './BigButton.svelte';
 
-  let { table, title, helper, addLabel, examples }:
-    { table: CatalogTable; title: string; helper: string; addLabel: string; examples: string } = $props();
+  interface Props {
+    table: CatalogTable;
+    title: string;
+    noun: string;
+    helper: string;
+    addLabel: string;
+    examples: string;
+  }
+
+  let { table, title, noun, helper, addLabel, examples }: Props = $props();
 
   let loaded = $state(false);
   let entries = $state<CatalogEntry[]>([]);
@@ -18,7 +26,7 @@
   async function add() {
     const name = newName.trim();
     if (!name) return;
-    const existing = table === 'clients'
+    const existing = table === 'clients' || table === 'approvers'
       ? entries.find((e) => e.name.toLowerCase() === name.toLowerCase())
       : null;
     try {
@@ -48,9 +56,9 @@
     const ok = await deleteEntryIfUnused(await getDb(), table, e.id);
     if (!ok) {
       await setActive(await getDb(), table, e.id, false);
-      note = `"${e.name}" is used on past invoices, so it can't be deleted — it's now hidden from new rows instead.`;
+      note = `This ${noun} is used on past invoices, so "${e.name}" can't be deleted — it was deactivated and is now hidden from new rows.`;
     } else {
-      note = '';
+      note = `Deleted ${noun} "${e.name}".`;
     }
     await refresh();
   }
@@ -60,11 +68,11 @@
 <p class="helper">{helper}</p>
 
 <div class="add">
-  <input placeholder={addLabel} bind:value={newName} onkeydown={(e) => e.key === 'Enter' && add()} />
+  <input aria-label={`Add ${noun}`} placeholder={addLabel} bind:value={newName} onkeydown={(e) => e.key === 'Enter' && add()} />
   <BigButton onclick={add}>Add</BigButton>
 </div>
 
-{#if note}<p class="note">{note}</p>{/if}
+<p class="note" class:visible={note !== ''} role="status" aria-live="polite">{note}</p>
 
 {#if loaded && entries.length === 0}
   <p class="empty">Nothing here yet — add your first one above (e.g. {examples}).</p>
@@ -72,7 +80,7 @@
   <ul>
     {#each entries as e (e.id)}
       <li class:inactive={!e.active}>
-        <input class="name" value={e.name} onblur={(ev) => rename(e.id, (ev.currentTarget as HTMLInputElement).value)} />
+        <input aria-label={`Rename ${noun} ${e.name}`} class="name" value={e.name} onblur={(ev) => rename(e.id, (ev.currentTarget as HTMLInputElement).value)} />
         <button class="toggle" class:on={e.active} onclick={() => toggle(e)}>{e.active ? '● Active' : 'Inactive'}</button>
         <button class="del" onclick={() => del(e)}>Delete</button>
       </li>
@@ -86,6 +94,7 @@
   .add { display: flex; gap: var(--sp-3); margin-bottom: var(--sp-4); max-width: calc(560px * var(--fs-scale)); }
   .add input { flex: 1; height: var(--input-h); padding: 0 14px; font-size: var(--fs-base); border: 1px solid var(--border); border-radius: var(--r-sm); }
   .note { background: var(--amber-50); color: var(--amber-600); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-sm); max-width: calc(560px * var(--fs-scale)); }
+  .note:not(.visible) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .empty { color: var(--text-secondary); }
   ul { list-style: none; margin: 0; padding: 0; max-width: calc(560px * var(--fs-scale)); }
   li { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: var(--sp-3); min-height: var(--input-h); border-bottom: 1px solid var(--border); }

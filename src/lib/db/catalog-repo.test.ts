@@ -11,7 +11,7 @@ async function freshDb() {
   return db;
 }
 
-describe('catalog repo (clients/locations)', () => {
+describe('catalog repo (clients/locations/approvers)', () => {
   test('add and list', async () => {
     const db = await freshDb();
     const id = await addEntry(db, 'clients', 'Globex Finance Group');
@@ -30,6 +30,17 @@ describe('catalog repo (clients/locations)', () => {
     expect(duplicateId).toBe(id);
     expect(await listEntries(db, 'clients')).toEqual([
       { id, name: 'Globex Finance Group', active: true },
+    ]);
+  });
+
+  test('approver quick-add reuses and reactivates a normalized match', async () => {
+    const db = await freshDb();
+    const id = await addEntry(db, 'approvers', 'Jordan Lee');
+    await setActive(db, 'approvers', id, false);
+
+    expect(await addEntry(db, 'approvers', '  jordan lee ')).toBe(id);
+    expect(await listEntries(db, 'approvers')).toEqual([
+      { id, name: 'Jordan Lee', active: true },
     ]);
   });
 
@@ -92,5 +103,63 @@ describe('catalog repo (clients/locations)', () => {
     );
     expect(await deleteEntryIfUnused(db, 'clients', id)).toBe(true);
     expect(await listEntries(db, 'clients')).toEqual([]);
+  });
+
+  test('approver deletion detaches drafts but preserves their stored approver name', async () => {
+    const db = await freshDb();
+    const id = await addEntry(db, 'approvers', 'Jordan Lee');
+    await db.execute("INSERT INTO invoices (id, year, status) VALUES (1, 2026, 'draft')");
+    await db.execute(
+      "INSERT INTO line_items (invoice_id, type, mileage_approver_id, mileage_approver_name) VALUES (1, 'completed', ?, 'Jordan Lee')",
+      [id],
+    );
+
+    expect(await deleteEntryIfUnused(db, 'approvers', id)).toBe(true);
+    expect(await db.select(
+      'SELECT mileage_approver_id, mileage_approver_name FROM line_items',
+    )).toEqual([{ mileage_approver_id: null, mileage_approver_name: 'Jordan Lee' }]);
+    expect(await listEntries(db, 'approvers')).toEqual([]);
+  });
+
+  test.each(['finalized', 'void'] as const)(
+    'approver deletion refuses a %s invoice reference',
+    async (status) => {
+      const db = await freshDb();
+      const id = await addEntry(db, 'approvers', 'Jordan Lee');
+      await db.execute('INSERT INTO invoices (id, year, status) VALUES (1, 2026, ?)', [status]);
+      await db.execute(
+        "INSERT INTO line_items (invoice_id, type, mileage_approver_id, mileage_approver_name) VALUES (1, 'completed', ?, 'Jordan Lee')",
+        [id],
+      );
+
+      expect(await deleteEntryIfUnused(db, 'approvers', id)).toBe(false);
+      expect(await db.select('SELECT mileage_approver_id FROM line_items')).toEqual([
+        { mileage_approver_id: id },
+      ]);
+      expect((await listEntries(db, 'approvers')).map((entry) => entry.id)).toEqual([id]);
+    },
+  );
+
+  test('approver deletion rolls draft detachment back when deleting the catalog row fails', async () => {
+    const db = await freshDb();
+    const id = await addEntry(db, 'approvers', 'Jordan Lee');
+    await db.execute("INSERT INTO invoices (id, year, status) VALUES (1, 2026, 'draft')");
+    await db.execute(
+      "INSERT INTO line_items (invoice_id, type, mileage_approver_id, mileage_approver_name) VALUES (1, 'completed', ?, 'Jordan Lee')",
+      [id],
+    );
+    await db.execute(`CREATE TRIGGER fail_approver_delete
+      BEFORE DELETE ON approvers
+      BEGIN
+        SELECT RAISE(FAIL, 'injected approver delete failure');
+      END`);
+
+    await expect(deleteEntryIfUnused(db, 'approvers', id)).rejects.toThrow(
+      /injected approver delete failure/i,
+    );
+    expect(await db.select('SELECT mileage_approver_id FROM line_items')).toEqual([
+      { mileage_approver_id: id },
+    ]);
+    expect((await listEntries(db, 'approvers')).map((entry) => entry.id)).toEqual([id]);
   });
 });
