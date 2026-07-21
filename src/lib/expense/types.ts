@@ -47,6 +47,26 @@ export interface ExpenseRollup {
   totalCents: Cents;
 }
 
+export interface ExpenseSummaryReport extends ExpenseListItem {
+  status: 'finalized';
+}
+
+export interface ExpenseSummaryItemRow {
+  reportId: number;
+  reportNumber: string;
+  reportDate: string;
+  itemId: number;
+  itemDate: string;
+  position: number;
+  description: string;
+  amountCents: Cents;
+}
+
+export interface ExpenseSummaryData {
+  reports: ExpenseSummaryReport[];
+  items: ExpenseSummaryItemRow[];
+}
+
 export type ExpenseBlockerField =
   | 'sequence'
   | 'reportDate'

@@ -11,7 +11,11 @@ import type {
   ExpenseRollup,
   ExpenseSnapshot,
   ExpenseStatus,
+  ExpenseSummaryData,
+  ExpenseSummaryItemRow,
+  ExpenseSummaryReport,
 } from '../expense/types';
+import type { ClosedDateRange } from '../history/history';
 
 export type ExpenseDraftHeader = Omit<ExpenseDraft, 'seq' | 'items'>;
 
@@ -278,6 +282,16 @@ export async function listExpensesForYear(db: Db, year: number): Promise<Expense
   return rows.map(toExpenseListItem);
 }
 
+export async function listFinalizedExpenses(db: Db): Promise<ExpenseListItem[]> {
+  const rows = await db.select<ExpenseListRow>(
+    `SELECT id, year, seq, report_date, total_cents, status
+       FROM expense_reports
+      WHERE status = 'finalized'
+      ORDER BY year DESC, seq ASC`,
+  );
+  return rows.map(toExpenseListItem);
+}
+
 export async function searchExpenses(db: Db, query: string): Promise<ExpenseListItem[]> {
   const value = query.trim();
   if (!value) return [];
@@ -286,7 +300,7 @@ export async function searchExpenses(db: Db, query: string): Promise<ExpenseList
     `SELECT DISTINCT er.id, er.year, er.seq, er.report_date, er.total_cents, er.status
        FROM expense_reports er
        LEFT JOIN expense_items ei ON ei.expense_report_id = er.id
-      WHERE er.status = 'finalized' AND (
+      WHERE er.status IN ('finalized', 'void') AND (
             er.report_date LIKE ?
          OR (er.seq || '-' || er.year) LIKE ?
          OR ei.description LIKE ?)
@@ -303,6 +317,73 @@ export async function listVoidedExpenses(db: Db): Promise<ExpenseListItem[]> {
       ORDER BY year DESC, seq ASC`,
   );
   return rows.map(toExpenseListItem);
+}
+
+interface ExpenseSummaryItemDbRow {
+  report_id: number;
+  report_year: number;
+  report_seq: number;
+  report_date: string;
+  item_id: number;
+  item_date: string;
+  position: number;
+  description: string;
+  amount_cents: number;
+}
+
+function expenseRangeSql(range: ClosedDateRange | null): {
+  where: string;
+  params: unknown[];
+} {
+  return range === null
+    ? { where: '', params: [] }
+    : { where: ' AND report_date >= ? AND report_date <= ?', params: [range.start, range.end] };
+}
+
+/** Finalized report headers and every item belonging to reports selected by report date. */
+export async function expenseSummaryForRange(
+  db: Db,
+  range: ClosedDateRange | null,
+): Promise<ExpenseSummaryData> {
+  const { where, params } = expenseRangeSql(range);
+  const [reportRows, itemRows] = await Promise.all([
+    db.select<ExpenseListRow>(
+      `SELECT id, year, seq, report_date, total_cents, status
+         FROM expense_reports
+        WHERE status = 'finalized'${where}
+        ORDER BY year ASC, seq ASC`,
+      params,
+    ),
+    db.select<ExpenseSummaryItemDbRow>(
+      `SELECT er.id AS report_id,
+              er.year AS report_year,
+              er.seq AS report_seq,
+              er.report_date,
+              ei.id AS item_id,
+              ei.date AS item_date,
+              ei.position,
+              ei.description,
+              ei.amount_cents
+         FROM expense_reports er
+         JOIN expense_items ei ON ei.expense_report_id = er.id
+        WHERE er.status = 'finalized'${where.replaceAll('report_date', 'er.report_date')}
+        ORDER BY ei.date ASC, er.year ASC, er.seq ASC, ei.position ASC, ei.id ASC`,
+      params,
+    ),
+  ]);
+
+  const reports = reportRows.map(toExpenseListItem) as ExpenseSummaryReport[];
+  const items: ExpenseSummaryItemRow[] = itemRows.map((row) => ({
+    reportId: row.report_id,
+    reportNumber: `${row.report_seq}-${row.report_year}`,
+    reportDate: row.report_date,
+    itemId: row.item_id,
+    itemDate: row.item_date,
+    position: row.position,
+    description: row.description,
+    amountCents: row.amount_cents,
+  }));
+  return { reports, items };
 }
 
 export async function duplicateExpenseReport(

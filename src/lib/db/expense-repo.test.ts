@@ -7,10 +7,12 @@ import {
   deleteVoidedExpenseReport,
   duplicateExpenseReport,
   expenseYearRollup,
+  expenseSummaryForRange,
   finalizeExpenseReport,
   getExpenseStatus,
   latestExpenseDraftId,
   listExpenseYears,
+  listFinalizedExpenses,
   listExpensesForYear,
   listVoidedExpenses,
   loadExpenseDraft,
@@ -208,7 +210,7 @@ describe('expense history and lifecycle', () => {
     return id;
   }
 
-  test('groups, totals, and searches only finalized reports', async () => {
+  test('groups and totals finalized reports while search also discovers cancelled reports', async () => {
     const db = await freshDb();
     await finalized(db, { seq: 1, reportDate: '2025-12-31', year: 2025, items: [item({ description: 'Hotel', amountCents: 9_000 })] });
     await finalized(db, { seq: 1, reportDate: '2026-07-15', year: 2026, items: [item({ description: 'Fuel', amountCents: 5_000 })] });
@@ -219,7 +221,7 @@ describe('expense history and lifecycle', () => {
     expect(await expenseYearRollup(db, 2026)).toEqual({ count: 1, totalCents: 5_000 });
     expect((await listExpensesForYear(db, 2026)).map((report) => report.reportNumber)).toEqual(['1-2026']);
     expect((await searchExpenses(db, 'Fuel')).map((report) => report.reportNumber)).toEqual(['1-2026']);
-    expect((await searchExpenses(db, '2-2026'))).toEqual([]);
+    expect((await searchExpenses(db, '2-2026')).map((report) => report.status)).toEqual(['void']);
     expect((await listVoidedExpenses(db)).map((report) => report.reportNumber)).toEqual(['2-2026']);
   });
 
@@ -309,5 +311,90 @@ describe('expense history and lifecycle', () => {
 
     await expect(voidExpenseReport(noUpdateDb, id)).rejects.toThrow(/changed before it could be cancelled/i);
     expect(await getExpenseStatus(db, id)).toBe('finalized');
+  });
+
+  test('loads every finalized report in one ordered history result with void and draft excluded', async () => {
+    const db = await freshDb();
+    await finalized(db, {
+      seq: 2, year: 2026, reportDate: '2026-07-15',
+      items: [item({ description: 'Second report' })],
+    });
+    await finalized(db, {
+      seq: 1, year: 2026, reportDate: '2026-07-10',
+      items: [item({ description: 'First report' })],
+    });
+    const voidId = await finalized(db, {
+      seq: 3, year: 2026, reportDate: '2026-07-20',
+      items: [item({ description: 'Cancelled report' })],
+    });
+    await voidExpenseReport(db, voidId);
+    await createExpenseDraft(db, header({ reportDate: '2025-01-01', year: 2025 }));
+
+    const rows = await listFinalizedExpenses(db);
+    expect(rows.map((report) => report.reportNumber)).toEqual(['1-2026', '2-2026']);
+    expect(rows.every((report) => report.status === 'finalized')).toBe(true);
+  });
+
+  test('qualifies summaries by report date and includes every stored item from a qualifying report', async () => {
+    const db = await freshDb();
+    await finalized(db, {
+      seq: 4,
+      reportDate: '2026-07-15',
+      periodStart: '2026-06-01',
+      periodEnd: '2026-08-31',
+      items: [
+        item({ position: 0, date: '2026-08-01', description: 'August parking', amountCents: 2_500 }),
+        item({ position: 1, date: '2026-06-30', description: 'June fuel', amountCents: 5_000 }),
+      ],
+    });
+    await finalized(db, {
+      seq: 5,
+      reportDate: '2026-08-01',
+      periodStart: '2026-08-01',
+      periodEnd: '2026-08-31',
+      items: [item({ date: '2026-08-01', description: 'Out-of-range report', amountCents: 9_000 })],
+    });
+
+    const summary = await expenseSummaryForRange(db, {
+      start: '2026-07-01',
+      end: '2026-07-31',
+    });
+    expect(summary.reports.map((report) => report.reportNumber)).toEqual(['4-2026']);
+    expect(summary.items.map((row) => row.description)).toEqual(['June fuel', 'August parking']);
+    expect(summary.items.reduce((sum, row) => sum + row.amountCents, 0))
+      .toBe(summary.reports.reduce((sum, report) => sum + report.totalCents, 0));
+  });
+
+  test('orders tied summary items deterministically and All time excludes void reports', async () => {
+    const db = await freshDb();
+    const first = await finalized(db, {
+      seq: 2,
+      reportDate: '2026-07-10',
+      items: [
+        item({ position: 0, date: '2026-07-02', description: 'Report two first' }),
+        item({ position: 1, date: '2026-07-02', description: 'Report two second' }),
+      ],
+    });
+    await finalized(db, {
+      seq: 1,
+      reportDate: '2026-07-09',
+      items: [item({ date: '2026-07-02', description: 'Report one' })],
+    });
+    await finalized(db, {
+      seq: 3,
+      reportDate: '2026-07-11',
+      items: [
+        item({ position: 0, date: '2026-07-02', description: 'Report three first' }),
+        item({ position: 1, date: '2026-07-02', description: 'Report three second' }),
+      ],
+    });
+    await voidExpenseReport(db, first);
+
+    const summary = await expenseSummaryForRange(db, null);
+    expect(summary.reports.map((report) => report.reportNumber)).toEqual(['1-2026', '3-2026']);
+    expect(summary.items.map((row) => row.description)).toEqual([
+      'Report one', 'Report three first', 'Report three second',
+    ]);
+    expect(summary.reports.every((report) => report.status === 'finalized')).toBe(true);
   });
 });
