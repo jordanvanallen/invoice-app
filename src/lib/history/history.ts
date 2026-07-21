@@ -81,7 +81,7 @@ export function sumInvoiceHistory(rows: readonly { totalCents: number; taxCents:
   totalBilledCents: number;
   totalTaxCents: number;
 } {
-  return rows.reduce((rollup, row) => ({
+  return rows.reduce<{ count: number; totalBilledCents: number; totalTaxCents: number }>((rollup, row) => ({
     count: rollup.count + 1,
     totalBilledCents: rollup.totalBilledCents + row.totalCents,
     totalTaxCents: rollup.totalTaxCents + row.taxCents,
@@ -92,7 +92,7 @@ export function sumExpenseHistory(rows: readonly { totalCents: number }[]): {
   count: number;
   totalCents: number;
 } {
-  return rows.reduce((rollup, row) => ({
+  return rows.reduce<{ count: number; totalCents: number }>((rollup, row) => ({
     count: rollup.count + 1,
     totalCents: rollup.totalCents + row.totalCents,
   }), { count: 0, totalCents: 0 });

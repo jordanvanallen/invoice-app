@@ -2,7 +2,7 @@ import { test, expect, describe } from 'vitest';
 import { createSqlJsDb } from './sqljs-adapter';
 import { runMigrations } from './migrate';
 import { addEntry, deleteEntryIfUnused, listEntries, renameEntry, setActive } from './catalog-repo';
-import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, finalizeInvoice, reprintSnapshot, listYears, listInvoicesForYear, yearRollup, latestDraftId, duplicateInvoice, yearClientBreakdown, rangeRollup, rangeClientBreakdown, peekNextSeq, voidInvoice, listVoided, unvoidInvoice, searchInvoices, loadBilledHistory, getInvoiceStatus, deleteVoidedInvoice } from './invoice-repo';
+import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, finalizeInvoice, reprintSnapshot, listYears, listFinalizedInvoices, listInvoicesForYear, yearRollup, latestDraftId, duplicateInvoice, yearClientBreakdown, rangeRollup, rangeClientBreakdown, peekNextSeq, voidInvoice, listVoided, unvoidInvoice, searchInvoices, loadBilledHistory, getInvoiceStatus, deleteVoidedInvoice } from './invoice-repo';
 import { allocateSeq } from './numbering-repo';
 import { getSettings, saveSettings } from './settings-repo';
 import type { LineItem } from '../types';
@@ -1062,13 +1062,103 @@ describe('range summary', () => {
     await fin(db, '2026-01-15', 'A Co', 3800); // in
     await fin(db, '2026-03-31', 'B Co', 2500); // in (boundary)
     await fin(db, '2026-04-01', 'C Co', 9900); // out
-    const r = await rangeRollup(db, '2026-01-01', '2026-03-31');
+    const r = await rangeRollup(db, { start: '2026-01-01', end: '2026-03-31' });
     expect(r.count).toBe(2);
     // A: 3800 + 13% (494) = 4294 ; B: 2500 + 13% (325) = 2825
     expect(r.totalTaxCents).toBe(494 + 325);
     expect(r.totalBilledCents).toBe(4294 + 2825);
-    const bd = await rangeClientBreakdown(db, '2026-01-01', '2026-03-31');
+    const bd = await rangeClientBreakdown(db, { start: '2026-01-01', end: '2026-03-31' });
     expect(bd.map((b) => b.clientName).sort()).toEqual(['A Co', 'B Co']);
+  });
+
+  test('All time includes every finalized year and excludes void and draft invoices', async () => {
+    const db = await freshDb();
+    await fin(db, '2025-12-31', 'A Co', 3800);
+    await fin(db, '2026-01-01', 'B Co', 2500);
+
+    const voidId = await createDraft(db, {
+      year: 2026, issueDate: '2026-02-01', periodStart: '2026-02-01', periodEnd: '2026-02-01',
+    });
+    await saveDraft(db, voidId, {
+      year: 2026, issueDate: '2026-02-01', periodStart: '2026-02-01', periodEnd: '2026-02-01',
+      lines: [line({ clientName: 'Void Co' })],
+    });
+    await finalizeInvoice(db, voidId);
+    await voidInvoice(db, voidId);
+
+    await createDraft(db, {
+      year: 2026, issueDate: '2026-03-01', periodStart: '2026-03-01', periodEnd: '2026-03-01',
+    });
+
+    expect((await rangeRollup(db, null)).count).toBe(2);
+    expect((await rangeClientBreakdown(db, null)).map((row) => row.clientName)).toEqual(['A Co', 'B Co']);
+  });
+
+  test('uses client name as the deterministic tie-breaker', async () => {
+    const db = await freshDb();
+    await fin(db, '2026-01-01', 'Zulu Co', 3800);
+    await fin(db, '2026-01-02', 'Alpha Co', 3800);
+
+    expect((await rangeClientBreakdown(db, null)).map((row) => row.clientName))
+      .toEqual(['Alpha Co', 'Zulu Co']);
+  });
+});
+
+describe('fixed-query invoice history reads', () => {
+  async function createInvoice(
+    db: Awaited<ReturnType<typeof freshDb>>,
+    issueDate: string,
+    clientName: string,
+    status: 'draft' | 'finalized' | 'void',
+  ) {
+    const id = await createDraft(db, {
+      year: Number(issueDate.slice(0, 4)), issueDate, periodStart: issueDate, periodEnd: issueDate,
+    });
+    await saveDraft(db, id, {
+      year: Number(issueDate.slice(0, 4)), issueDate, periodStart: issueDate, periodEnd: issueDate,
+      lines: [line({ clientName })],
+    });
+    if (status !== 'draft') await finalizeInvoice(db, id);
+    if (status === 'void') await voidInvoice(db, id);
+    return id;
+  }
+
+  test('loads finalized and void invoices with status and frozen tax while excluding drafts', async () => {
+    const db = await freshDb();
+    await createInvoice(db, '2025-12-31', 'Older Finalized', 'finalized');
+    await createInvoice(db, '2026-07-20', 'Newer Finalized', 'finalized');
+    await createInvoice(db, '2026-07-19', 'Cancelled Client', 'void');
+    await createInvoice(db, '2026-07-21', 'Draft Client', 'draft');
+
+    const finalized = await listFinalizedInvoices(db);
+    expect(finalized.map((row) => row.issueDate)).toEqual(['2026-07-20', '2025-12-31']);
+    expect(finalized.every((row) => row.status === 'finalized')).toBe(true);
+    expect(finalized.every((row) => Number.isInteger(row.taxCents) && row.taxCents > 0)).toBe(true);
+
+    const voided = await listVoided(db);
+    expect(voided).toEqual([
+      expect.objectContaining({ status: 'void', issueDate: '2026-07-19', taxCents: expect.any(Number) }),
+    ]);
+    expect([...finalized, ...voided].some((row) => row.issueDate === '2026-07-21')).toBe(false);
+  });
+
+  test('searches finalized and void invoices but never drafts', async () => {
+    const db = await freshDb();
+    await createInvoice(db, '2026-07-18', 'Finalized Needle', 'finalized');
+    await createInvoice(db, '2026-07-19', 'Cancelled Needle', 'void');
+    await createInvoice(db, '2026-07-20', 'Draft Needle', 'draft');
+
+    expect((await searchInvoices(db, 'Needle')).map((row) => row.status))
+      .toEqual(['finalized', 'void']);
+  });
+
+  test('listYears excludes years containing only drafts or void invoices', async () => {
+    const db = await freshDb();
+    await createInvoice(db, '2024-01-01', 'Draft', 'draft');
+    await createInvoice(db, '2025-01-01', 'Void', 'void');
+    await createInvoice(db, '2026-01-01', 'Final', 'finalized');
+
+    expect(await listYears(db)).toEqual([2026]);
   });
 });
 

@@ -7,6 +7,7 @@ import { checkOverride } from '../numbering';
 import { invoiceFinalizeBlockers } from '../validation';
 import { getSettings } from './settings-repo';
 import { takenSeqs } from './numbering-repo';
+import type { ClosedDateRange } from '../history/history';
 
 export interface DraftHeader {
   year: number;
@@ -326,13 +327,36 @@ export interface InvoiceListItem {
   invoiceNumber: string;
   issueDate: string;
   totalCents: number;
+  taxCents: number;
+  status: 'finalized' | 'void';
 }
 
-/** Calendar years (of issue_date) that have at least one non-void invoice, descending. */
+interface InvoiceListRow {
+  id: number;
+  year: number;
+  seq: number;
+  issue_date: string;
+  total_cents: number;
+  tax_cents: number;
+  status: 'finalized' | 'void';
+}
+
+function toInvoiceListItem(row: InvoiceListRow): InvoiceListItem {
+  return {
+    id: row.id,
+    invoiceNumber: `${row.seq}-${row.year}`,
+    issueDate: row.issue_date,
+    totalCents: row.total_cents,
+    taxCents: row.tax_cents,
+    status: row.status,
+  };
+}
+
+/** Calendar years (of issue_date) that have at least one finalized invoice, descending. */
 export async function listYears(db: Db): Promise<number[]> {
   const rows = await db.select<{ y: number }>(
     `SELECT DISTINCT CAST(substr(issue_date, 1, 4) AS INTEGER) AS y
-       FROM invoices WHERE status != 'void' AND issue_date != ''
+       FROM invoices WHERE status = 'finalized' AND issue_date != ''
       ORDER BY y DESC`,
   );
   return rows.map((r) => r.y);
@@ -351,31 +375,37 @@ export async function yearRollup(db: Db, year: number): Promise<YearRollup> {
 }
 
 export async function listInvoicesForYear(db: Db, year: number): Promise<InvoiceListItem[]> {
-  const rows = await db.select<{ id: number; year: number; seq: number; issue_date: string; total_cents: number }>(
-    `SELECT id, year, seq, issue_date, total_cents
+  const rows = await db.select<InvoiceListRow>(
+    `SELECT id, year, seq, issue_date, total_cents, tax_cents, status
        FROM invoices
       WHERE status = 'finalized' AND CAST(substr(issue_date, 1, 4) AS INTEGER) = ?
       ORDER BY seq ASC`,
     [year],
   );
-  return rows.map((r) => ({
-    id: r.id,
-    invoiceNumber: `${r.seq}-${r.year}`,
-    issueDate: r.issue_date,
-    totalCents: r.total_cents,
-  }));
+  return rows.map(toInvoiceListItem);
 }
 
-/** Search finalized invoices by number, issue date, client, location, VIN, or inspection #. */
+/** Every finalized invoice in descending issue-date order. */
+export async function listFinalizedInvoices(db: Db): Promise<InvoiceListItem[]> {
+  const rows = await db.select<InvoiceListRow>(
+    `SELECT id, year, seq, issue_date, total_cents, tax_cents, status
+       FROM invoices
+      WHERE status = 'finalized'
+      ORDER BY year DESC, seq ASC`,
+  );
+  return rows.map(toInvoiceListItem);
+}
+
+/** Search finalized and void invoices by number, issue date, client, location, VIN, or inspection #. */
 export async function searchInvoices(db: Db, query: string): Promise<InvoiceListItem[]> {
   const q = query.trim();
   if (!q) return [];
   const like = `%${q}%`;
-  const rows = await db.select<{ id: number; year: number; seq: number; issue_date: string; total_cents: number }>(
-    `SELECT DISTINCT i.id, i.year, i.seq, i.issue_date, i.total_cents
+  const rows = await db.select<InvoiceListRow>(
+    `SELECT DISTINCT i.id, i.year, i.seq, i.issue_date, i.total_cents, i.tax_cents, i.status
        FROM invoices i
        LEFT JOIN line_items li ON li.invoice_id = i.id
-      WHERE i.status = 'finalized' AND (
+      WHERE i.status IN ('finalized', 'void') AND (
             i.issue_date LIKE ?
          OR (i.seq || '-' || i.year) LIKE ?
          OR li.client_name LIKE ?
@@ -385,12 +415,7 @@ export async function searchInvoices(db: Db, query: string): Promise<InvoiceList
       ORDER BY i.year DESC, i.seq ASC`,
     [like, like, like, like, like, like],
   );
-  return rows.map((r) => ({
-    id: r.id,
-    invoiceNumber: `${r.seq}-${r.year}`,
-    issueDate: r.issue_date,
-    totalCents: r.total_cents,
-  }));
+  return rows.map(toInvoiceListItem);
 }
 
 export interface BilledHistory {
@@ -481,36 +506,41 @@ export async function yearClientBreakdown(db: Db, year: number): Promise<ClientB
        JOIN invoices i ON i.id = li.invoice_id
       WHERE i.status = 'finalized' AND CAST(substr(i.issue_date, 1, 4) AS INTEGER) = ?
       GROUP BY li.client_name
-      ORDER BY subtotalCents DESC`,
+      ORDER BY subtotalCents DESC, clientName ASC`,
     [year],
   );
 }
 
-/** Rollup over an inclusive issue-date range [start, end] (ISO dates). */
-export async function rangeRollup(db: Db, start: string, end: string): Promise<YearRollup> {
+/** Rollup over All time or an inclusive issue-date range. */
+export async function rangeRollup(db: Db, range: ClosedDateRange | null): Promise<YearRollup> {
+  const where = range === null ? '' : ' AND issue_date >= ? AND issue_date <= ?';
   const [r] = await db.select<{ count: number; billed: number; tax: number }>(
     `SELECT COUNT(*) AS count,
             COALESCE(SUM(total_cents), 0) AS billed,
             COALESCE(SUM(tax_cents), 0) AS tax
        FROM invoices
-      WHERE status = 'finalized' AND issue_date >= ? AND issue_date <= ?`,
-    [start, end],
+      WHERE status = 'finalized'${where}`,
+    range === null ? [] : [range.start, range.end],
   );
   return { count: r.count, totalBilledCents: r.billed, totalTaxCents: r.tax };
 }
 
-/** Per-client pre-tax subtotal over an inclusive issue-date range. */
-export async function rangeClientBreakdown(db: Db, start: string, end: string): Promise<ClientBreakdownRow[]> {
+/** Per-client pre-tax subtotal over All time or an inclusive issue-date range. */
+export async function rangeClientBreakdown(
+  db: Db,
+  range: ClosedDateRange | null,
+): Promise<ClientBreakdownRow[]> {
+  const where = range === null ? '' : ' AND i.issue_date >= ? AND i.issue_date <= ?';
   return db.select<ClientBreakdownRow>(
     `SELECT li.client_name AS clientName,
             COUNT(*) AS count,
             COALESCE(SUM(li.fee_cents + li.mileage_cents), 0) AS subtotalCents
        FROM line_items li
        JOIN invoices i ON i.id = li.invoice_id
-      WHERE i.status = 'finalized' AND i.issue_date >= ? AND i.issue_date <= ?
+      WHERE i.status = 'finalized'${where}
       GROUP BY li.client_name
-      ORDER BY subtotalCents DESC`,
-    [start, end],
+      ORDER BY subtotalCents DESC, clientName ASC`,
+    range === null ? [] : [range.start, range.end],
   );
 }
 
@@ -534,10 +564,11 @@ export async function voidInvoice(db: Db, id: number): Promise<void> {
 
 /** Cancelled invoices: newest year first, then invoice number ascending. */
 export async function listVoided(db: Db): Promise<InvoiceListItem[]> {
-  const rows = await db.select<{ id: number; year: number; seq: number; issue_date: string; total_cents: number }>(
-    `SELECT id, year, seq, issue_date, total_cents FROM invoices WHERE status = 'void' ORDER BY year DESC, seq ASC`,
+  const rows = await db.select<InvoiceListRow>(
+    `SELECT id, year, seq, issue_date, total_cents, tax_cents, status
+       FROM invoices WHERE status = 'void' ORDER BY year DESC, seq ASC`,
   );
-  return rows.map((r) => ({ id: r.id, invoiceNumber: `${r.seq}-${r.year}`, issueDate: r.issue_date, totalCents: r.total_cents }));
+  return rows.map(toInvoiceListItem);
 }
 
 /** Restore a cancelled invoice back to finalized (keeps its original number + snapshot). */

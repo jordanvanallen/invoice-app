@@ -95,9 +95,10 @@
   async function exportRange() {
     if (!rangeStart || !rangeEnd || rangeStart > rangeEnd) return;
     const db = await getDb();
+    const range = { start: rangeStart, end: rangeEnd };
     const [rollup, breakdown, s] = await Promise.all([
-      rangeRollup(db, rangeStart, rangeEnd),
-      rangeClientBreakdown(db, rangeStart, rangeEnd),
+      rangeRollup(db, range),
+      rangeClientBreakdown(db, range),
       loadSettings(),
     ]);
     showSaveToast(await saveSummaryPdf({
