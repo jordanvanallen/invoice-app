@@ -320,6 +320,8 @@ git commit -m "Add fixed-query invoice history reads"
 - Consumes: `ClosedDateRange`.
 - Produces: `listFinalizedExpenses(db)`; updated `searchExpenses` with finalized/void; `ExpenseSummaryReport`, `ExpenseSummaryItemRow`, `ExpenseSummaryData`; `expenseSummaryForRange(db, range)`.
 
+History, search, and cancelled-report reads use the same product order as invoices: newest year first, then report sequence ascending within each year. Report date remains filter/display data. Expense-summary item detail keeps its separate chronological ordering contract.
+
 - [ ] **Step 1: Add failing sql.js tests for expense history/export semantics**
 
 Create reports where a July report contains a June-dated and an August-dated item, plus a void report and draft. Assert:

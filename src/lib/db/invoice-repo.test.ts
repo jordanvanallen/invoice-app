@@ -1161,12 +1161,13 @@ describe('fixed-query invoice history reads', () => {
 
   test('searches finalized and void invoices but never drafts', async () => {
     const db = await freshDb();
-    await createInvoice(db, '2026-07-18', 'Finalized Needle', 'finalized');
+    await createInvoice(db, '2025-07-18', 'Finalized Needle', 'finalized');
     await createInvoice(db, '2026-07-19', 'Cancelled Needle', 'void');
     await createInvoice(db, '2026-07-20', 'Draft Needle', 'draft');
 
-    expect((await searchInvoices(db, 'Needle')).map((row) => row.status))
-      .toEqual(['finalized', 'void']);
+    const results = await searchInvoices(db, 'Needle');
+    expect(results.map((row) => row.invoiceNumber)).toEqual(['1-2026', '1-2025']);
+    expect(results.map((row) => row.status)).toEqual(['void', 'finalized']);
   });
 
   test('listYears excludes years containing only drafts or void invoices', async () => {
@@ -1223,7 +1224,7 @@ describe('cancelled (void) listing + restore', () => {
 
   test('orders cancelled invoice history by number ascending within the year', async () => {
     const db = await freshDb();
-    for (const issueDate of ['2026-06-30', '2026-05-01', '2026-06-01']) {
+    for (const issueDate of ['2026-06-30', '2026-05-01', '2026-06-01', '2025-12-31']) {
       const id = await createDraft(db, {
         year: 2026, issueDate, periodStart: issueDate, periodEnd: issueDate,
       });
@@ -1236,7 +1237,7 @@ describe('cancelled (void) listing + restore', () => {
     }
 
     expect((await listVoided(db)).map((invoice) => invoice.invoiceNumber))
-      .toEqual(['1-2026', '2-2026', '3-2026']);
+      .toEqual(['1-2026', '2-2026', '3-2026', '1-2025']);
   });
 });
 

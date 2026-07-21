@@ -239,17 +239,22 @@ describe('expense history and lifecycle', () => {
       seq: 2, reportDate: '2026-07-10',
       items: [item({ description: 'History order' })],
     });
+    const priorYear = await finalized(db, {
+      seq: 1, year: 2025, reportDate: '2025-12-31',
+      items: [item({ description: 'History order' })],
+    });
 
     expect((await listExpensesForYear(db, 2026)).map((report) => report.reportNumber))
       .toEqual(['1-2026', '2-2026', '3-2026']);
     expect((await searchExpenses(db, 'History order')).map((report) => report.reportNumber))
-      .toEqual(['1-2026', '2-2026', '3-2026']);
+      .toEqual(['1-2026', '2-2026', '3-2026', '1-2025']);
 
     await voidExpenseReport(db, first);
     await voidExpenseReport(db, second);
     await voidExpenseReport(db, third);
+    await voidExpenseReport(db, priorYear);
     expect((await listVoidedExpenses(db)).map((report) => report.reportNumber))
-      .toEqual(['1-2026', '2-2026', '3-2026']);
+      .toEqual(['1-2026', '2-2026', '3-2026', '1-2025']);
   });
 
   test('duplicates to a fresh editable draft and guards status transitions', async () => {
