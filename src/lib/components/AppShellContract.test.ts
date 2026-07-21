@@ -56,11 +56,18 @@ describe('grouped sidebar navigation', () => {
     expect(source).not.toContain('<details');
   });
 
+  test('uses inset section bars without horizontal row dividers', () => {
+    expect(source).toContain('margin:0 0 var(--sp-2); padding:var(--sp-2) var(--sp-4);');
+    expect(source).toContain('border-radius:var(--r-sm); background:var(--bg-sunken); color:var(--text-secondary);');
+    expect(source).toContain('.nav-group li { margin-bottom:var(--sp-1); border:0; }');
+    expect(source).toContain('border:0; border-left:4px solid transparent; border-radius:var(--r-sm);');
+    expect(source).toContain('a.active { background:var(--accent-tint); border-left-color:var(--accent);');
+  });
+
   test('keeps grouped navigation scrollable above the unchanged footer', () => {
     expect(source).toContain('class="nav-groups"');
     expect(source).toContain('.nav-groups { flex:1; min-height:0; overflow-y:auto;');
     expect(source).toContain('.nav-group + .nav-group { margin-top:var(--sp-6); }');
-    expect(source).toContain('padding:0 calc(var(--sp-4) + 4px); color:var(--text-secondary);');
     expect(source.indexOf('class="nav-groups"')).toBeLessThan(source.indexOf('class="rail-footer"'));
     expect(source).toContain('{$settings?.inspectorName');
     expect(source).toContain('{$lastBackupAt}');
