@@ -14,9 +14,12 @@ describe('invoice history route contract', () => {
     expect(page).toContain("import '$lib/styles/history.css'");
     expect(page).toContain("type LoadState = 'loading' | 'ready' | 'error'");
     expect(page).toContain("type SearchState = 'idle' | 'loading' | 'ready' | 'error'");
-    expect(page).toContain('createLatestRequestGate');
+    expect(page).toContain('createHistorySearchLifecycle');
     expect(page).toContain('openYears');
     expect(page).toContain('busyAction');
+    expect(page).toContain('actionLocked={!!busyAction}');
+    expect(page).toContain('searchError');
+    expect(page).toContain('actionError');
   });
 
   test('freezes toolbar exports and keeps year exports calendar-scoped', () => {
@@ -39,6 +42,19 @@ describe('invoice history route contract', () => {
     expect(page).toContain("matchMedia('(prefers-reduced-motion: reduce)').matches");
     expect(page).toContain("aria-controls={`invoice-year-${group.year}`}");
     expect(page).toContain('No active invoices');
+    expect(page).toContain('aria-labelledby="cancelled-invoices-toggle"');
+  });
+
+  test('shows pre-tax income in each invoice year summary', () => {
+    expect(source()).toContain('formatDollars(group.rollup.totalBilledCents - group.rollup.totalTaxCents)');
+  });
+
+  test('restores keyboard focus after clearing search and restoring a cancelled row', () => {
+    const page = source();
+    expect(page).toContain('bind:this={searchInput}');
+    expect(page).toContain('async function clearSearch()');
+    expect(page).toContain('searchInput?.focus()');
+    expect(page).toContain('await tick();');
   });
 
   test('keeps View available while mutation and export actions are locked', () => {

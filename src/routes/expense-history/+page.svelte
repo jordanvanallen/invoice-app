@@ -16,7 +16,7 @@
   import type { ExpenseListItem } from '$lib/expense/types';
   import {
     calendarYearRange,
-    createLatestRequestGate,
+    createHistorySearchLifecycle,
     filterHistoryRows,
     groupHistoryRows,
     historyRangeLabel,
@@ -42,15 +42,21 @@
   let query = $state('');
   let searchRows = $state<ExpenseListItem[]>([]);
   let searchState = $state<SearchState>('idle');
+  let searchError = $state('');
+  let searchInput = $state<HTMLInputElement>();
   let openYears = $state<Record<number, boolean>>({});
   let cancelledOpen = $state(false);
   let cancelledToggle = $state<HTMLButtonElement>();
   let rangeStart = $state('');
   let rangeEnd = $state('');
   let busyAction = $state('');
-  let errorMessage = $state('');
-  const searchGate = createLatestRequestGate();
+  let actionError = $state('');
   const currentYear = new Date().getFullYear();
+  const searchLifecycle = createHistorySearchLifecycle<ExpenseListItem>((snapshot) => {
+    searchRows = snapshot.rows;
+    searchState = snapshot.status;
+    searchError = snapshot.error;
+  });
 
   const searching = $derived(query.trim().length > 0);
   const resolution = $derived(resolveHistoryRange(rangeStart, rangeEnd));
@@ -121,28 +127,13 @@
   });
 
   async function executeSearch(value: string): Promise<void> {
-    const requestId = searchGate.begin();
-    searchRows = [];
-    searchState = 'loading';
-    errorMessage = '';
-    try {
-      const rows = await searchExpenses(await getDb(), value);
-      if (!searchGate.isCurrent(requestId)) return;
-      searchRows = rows;
-      searchState = 'ready';
-    } catch (error) {
-      if (!searchGate.isCurrent(requestId)) return;
-      searchState = 'error';
-      errorMessage = (error as Error).message;
-    }
+    await searchLifecycle.run(async () => searchExpenses(await getDb(), value));
   }
 
   $effect(() => {
     const value = query.trim();
     if (!value) {
-      searchGate.begin();
-      searchRows = [];
-      searchState = 'idle';
+      searchLifecycle.clear();
       return;
     }
     void executeSearch(value);
@@ -157,11 +148,11 @@
   async function runAction(key: string, action: () => Promise<void>): Promise<void> {
     if (busyAction) return;
     busyAction = key;
-    errorMessage = '';
+    actionError = '';
     try {
       await action();
     } catch (error) {
-      errorMessage = (error as Error).message;
+      actionError = (error as Error).message;
     } finally {
       busyAction = '';
     }
@@ -193,7 +184,15 @@
       await loadAll();
       const value = query.trim();
       if (value) await executeSearch(value);
+      await tick();
+      searchInput?.focus();
     });
+  }
+
+  async function clearSearch(): Promise<void> {
+    query = '';
+    await tick();
+    searchInput?.focus();
   }
 
   async function showCancelled(): Promise<void> {
@@ -267,8 +266,11 @@
   {/if}
 </div>
 
-{#if errorMessage}
-  <p class="history-error" role="alert">{errorMessage}</p>
+{#if actionError}
+  <p class="history-error" role="alert">{actionError}</p>
+{/if}
+{#if searchError}
+  <p class="history-error" role="alert">Search failed: {searchError}</p>
 {/if}
 
 {#snippet reportRow(report: ExpenseListItem, allowRestore = false)}
@@ -278,7 +280,7 @@
       onclick={() => goto(`/expense/${report.id}`)}
       title="View expense report #{report.reportNumber}"
     >#{report.reportNumber}</button>
-    <span class="history-date">{report.reportDate}</span>
+    <span class="history-date">{report.reportDate || 'Date unavailable'}</span>
     <span class="history-amount tnum">{formatDollars(report.totalCents)}</span>
     <span class="history-actions">
       {#if allowRestore}
@@ -326,10 +328,11 @@
     <input
       type="search"
       bind:value={query}
+      bind:this={searchInput}
       aria-label="Search finalized and cancelled expense reports"
       placeholder="Search finalized expense reports — number, date, or description"
     />
-    {#if searching}<button onclick={() => (query = '')}>Clear</button>{/if}
+    {#if searching}<button onclick={clearSearch}>Clear</button>{/if}
   </div>
 
   <HistoryRangeControls
@@ -337,6 +340,7 @@
     bind:end={rangeEnd}
     exportLabel="Export expense summary"
     busyLabel={busyAction === 'range-export' ? 'Exporting…' : ''}
+    actionLocked={!!busyAction}
     onExport={exportRange}
   />
 
@@ -365,18 +369,21 @@
             aria-controls={`expense-year-${group.year}`}
           >
             <span class="history-year-label">
-              <span aria-hidden="true">{isYearOpen(group.year) ? '▾' : '▸'}</span> {group.year}
+              <span aria-hidden="true">{isYearOpen(group.year) ? '▾' : '▸'}</span>
+              {group.year === 0 ? 'Date unavailable' : group.year}
             </span>
             <span class="history-chips">
               <span class="history-chip">{group.rollup.count} {group.rollup.count === 1 ? 'report' : 'reports'}</span>
               <span class="history-chip tnum">{formatDollars(group.rollup.totalCents)} total</span>
             </span>
           </button>
-          <button
-            class="history-export"
-            disabled={!!busyAction}
-            onclick={() => exportYear(group.year)}
-          >{busyAction === `year-export-${group.year}` ? 'Exporting…' : `Export ${group.year} summary`}</button>
+          {#if group.year !== 0}
+            <button
+              class="history-export"
+              disabled={!!busyAction}
+              onclick={() => exportYear(group.year)}
+            >{busyAction === `year-export-${group.year}` ? 'Exporting…' : `Export ${group.year} summary`}</button>
+          {/if}
         </div>
         {#if isYearOpen(group.year)}
           <ul class="history-list" id={`expense-year-${group.year}`}>
@@ -392,8 +399,13 @@
   {/if}
 
   {#if visibleCancelled.length > 0}
-    <section class="history-year history-cancelled" id="cancelled-expense-reports">
+    <section
+      class="history-year history-cancelled"
+      id="cancelled-expense-reports"
+      aria-labelledby="cancelled-expense-reports-toggle"
+    >
       <button
+        id="cancelled-expense-reports-toggle"
         class="history-year-toggle"
         bind:this={cancelledToggle}
         onclick={() => (cancelledOpen = !cancelledOpen)}

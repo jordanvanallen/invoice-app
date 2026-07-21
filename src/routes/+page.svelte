@@ -264,6 +264,7 @@
 
   const allLines = $derived([...completed, ...noshow]);
   const finalizeBlockers = $derived(invoiceFinalizeBlockers(buildDraft()));
+  const issueDateBlocker = $derived(finalizeBlockers.find((blocker) => blocker.field === 'issueDate'));
   const blockedLineIndices = $derived(new Set(
     finalizeBlockers.flatMap((blocker) => blocker.lineIndex === null ? [] : [blocker.lineIndex]),
   ));
@@ -280,8 +281,14 @@
   };
 
   async function jumpToBlocker() {
-    const blocker = finalizeBlockers.find((candidate) => candidate.lineIndex !== null);
-    if (!blocker || blocker.lineIndex === null) return;
+    const blocker = finalizeBlockers[0];
+    if (!blocker) return;
+    if (blocker.field === 'issueDate') {
+      document.getElementById('invoice-date')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById('invoice-date')?.focus();
+      return;
+    }
+    if (blocker.lineIndex === null) return;
     const row = allLines[blocker.lineIndex];
     if (!row) return;
     const el = document.getElementById(`row-${row.uid}`);
@@ -409,7 +416,17 @@
       </span>
     </label>
     <label>Invoice date
-      <DatePicker bind:value={issueDate} ariaLabel="Invoice date" />
+      <DatePicker
+        bind:value={issueDate}
+        fieldId="invoice-date"
+        ariaLabel="Invoice date"
+        required
+        invalid={!!issueDateBlocker}
+        errorId={issueDateBlocker ? 'invoice-date-error' : ''}
+      />
+      {#if issueDateBlocker}
+        <span id="invoice-date-error" class="err">{issueDateBlocker.message}</span>
+      {/if}
     </label>
   </div>
 
@@ -457,6 +474,8 @@
       <div class="act">
         {#if allLines.length === 0}
           <span class="hint">Add at least one inspection to finish.</span>
+        {:else if issueDateBlocker}
+          <button type="button" class="hint hint-btn" onclick={jumpToBlocker}>Fix the invoice date to finish →</button>
         {:else if blockerCount > 0}
           <button type="button" class="hint hint-btn" onclick={jumpToBlocker}>Fix {blockerCount} {blockerCount === 1 ? 'row' : 'rows'} to finish →</button>
         {:else if seqValidation}

@@ -23,10 +23,13 @@ describe('expense history route', () => {
 
     expect(page).toContain("type LoadState = 'loading' | 'ready' | 'error'");
     expect(page).toContain("type SearchState = 'idle' | 'loading' | 'ready' | 'error'");
-    expect(page).toContain('createLatestRequestGate');
+    expect(page).toContain('createHistorySearchLifecycle');
     expect(page).toContain('Object.freeze({ ...resolution.range })');
     expect(page).toContain('calendarYearRange(year)');
     expect(page).toContain('Expense-Summary-${year}.pdf');
+    expect(page).toContain('actionLocked={!!busyAction}');
+    expect(page).toContain('searchError');
+    expect(page).toContain('actionError');
   });
 
   test('navigation keeps invoice and expense workflows distinct', () => {
@@ -43,6 +46,10 @@ describe('expense history route', () => {
     expect(page).toContain('cancelledToggle?.focus()');
     expect(page).toContain("matchMedia('(prefers-reduced-motion: reduce)').matches");
     expect(page).toContain('Cancelled expense reports');
+    expect(page).toContain('aria-labelledby="cancelled-expense-reports-toggle"');
+    expect(page).toContain('bind:this={searchInput}');
+    expect(page).toContain('async function clearSearch()');
+    expect(page).toContain('searchInput?.focus()');
   });
 
   test('report rows use the shared amount track and retain domain actions', () => {

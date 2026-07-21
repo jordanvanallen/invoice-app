@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   calendarYearRange,
+  createHistorySearchLifecycle,
   createLatestRequestGate,
   filterHistoryRows,
   groupHistoryRows,
@@ -70,6 +71,14 @@ describe('history derivation', () => {
     expect(invoices.map((row) => row.issueDate)).toEqual(['2026-02-01', '2025-12-31']);
   });
 
+  test('groups malformed legacy dates into a visible undated bucket', () => {
+    const rows = [{ date: '' }, { date: '2026-07-20' }, { date: 'not-a-date' }];
+    expect(groupHistoryRows(rows, (row) => row.date)).toEqual([
+      { year: 2026, rows: [rows[1]] },
+      { year: 0, rows: [rows[0], rows[2]] },
+    ]);
+  });
+
   test('splits finalized and void rows while excluding drafts', () => {
     expect(partitionHistoryRows([
       { id: 1, status: 'finalized' as const },
@@ -88,5 +97,37 @@ describe('history derivation', () => {
 
     expect(gate.isCurrent(first)).toBe(false);
     expect(gate.isCurrent(second)).toBe(true);
+  });
+
+  test('publishes only the latest search and clears an in-flight request', async () => {
+    type Row = { id: number };
+    const states: Array<{ status: string; rows: Row[]; error: string }> = [];
+    const lifecycle = createHistorySearchLifecycle<Row>((state) => states.push(state));
+    let resolveFirst!: (rows: Row[]) => void;
+    let resolveSecond!: (rows: Row[]) => void;
+    const first = lifecycle.run(() => new Promise<Row[]>((resolve) => { resolveFirst = resolve; }));
+    const second = lifecycle.run(() => new Promise<Row[]>((resolve) => { resolveSecond = resolve; }));
+
+    resolveSecond([{ id: 2 }]);
+    await second;
+    resolveFirst([{ id: 1 }]);
+    await first;
+    expect(states.at(-1)).toEqual({ status: 'ready', rows: [{ id: 2 }], error: '' });
+
+    let resolveThird!: (rows: Row[]) => void;
+    const third = lifecycle.run(() => new Promise<Row[]>((resolve) => { resolveThird = resolve; }));
+    lifecycle.clear();
+    resolveThird([{ id: 3 }]);
+    await third;
+    expect(states.at(-1)).toEqual({ status: 'idle', rows: [], error: '' });
+  });
+
+  test('publishes a search failure and clears it on reset', async () => {
+    const states: Array<{ status: string; rows: never[]; error: string }> = [];
+    const lifecycle = createHistorySearchLifecycle<never>((state) => states.push(state));
+    await lifecycle.run(async () => { throw new Error('search failed'); });
+    expect(states.at(-1)).toEqual({ status: 'error', rows: [], error: 'search failed' });
+    lifecycle.clear();
+    expect(states.at(-1)).toEqual({ status: 'idle', rows: [], error: '' });
   });
 });

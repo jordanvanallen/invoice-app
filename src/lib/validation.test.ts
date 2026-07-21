@@ -59,6 +59,18 @@ describe('missingFinalizeFields', () => {
 });
 
 describe('invoiceFinalizeBlockers', () => {
+  test.each(['', '2026-02-30', 'not-a-date'])(
+    'requires a canonical invoice issue date before finalization: %s',
+    (issueDate) => {
+      const invalidDraft = { ...draft([line()]), issueDate };
+      expect(invoiceFinalizeBlockers(invalidDraft)).toContainEqual({
+        lineIndex: null,
+        field: 'issueDate',
+        message: 'Choose a valid invoice date.',
+      });
+    },
+  );
+
   test('requires linked approver and valid date only for non-zero mileage', () => {
     const blockers = invoiceFinalizeBlockers(draft([line({
       mileageCents: 1800,

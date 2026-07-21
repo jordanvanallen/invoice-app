@@ -14,8 +14,8 @@ describe('shared history presentation contract', () => {
     expect(controls).toContain("resolution.kind === 'invalid'");
     expect(controls).toContain("role=\"alert\"");
     expect(controls).toContain('invalid={resolution.kind === \'invalid\'}');
-    expect(controls).toContain('errorId={errorId}');
-    expect(controls).toContain("disabled={resolution.kind === 'invalid' || !!busyLabel}");
+    expect(controls).toContain("errorId={resolution.kind === 'invalid' ? errorId : ''}");
+    expect(controls).toContain("disabled={resolution.kind === 'invalid' || actionLocked}");
   });
 
   test('shared rows reserve an aligned amount track and wrap actions by content width', () => {
@@ -28,5 +28,7 @@ describe('shared history presentation contract', () => {
     expect(styles).toContain('white-space: nowrap');
     expect(styles).toContain('@container (max-width: 820px)');
     expect(styles).toContain('.history-actions { grid-column: 1 / -1; }');
+    expect(styles).toContain('.history-year { container-type: inline-size;');
+    expect(styles).toContain('.history-year-bar > .history-export { flex-basis: 100%; }');
   });
 });

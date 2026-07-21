@@ -105,7 +105,7 @@
 .history-export-primary:hover:not(:disabled) { color: #fff; background: var(--accent-fill-hover); }
 .history-range-error { flex-basis: 100%; margin: 0; color: var(--red-600); font-size: var(--fs-sm); }
 
-.history-year { margin-bottom: var(--sp-6); }
+.history-year { container-type: inline-size; margin-bottom: var(--sp-6); }
 .history-cancelled { margin-top: var(--sp-8); }
 .history-year-bar { display: flex; align-items: stretch; gap: var(--sp-2); flex-wrap: wrap; }
 .history-year-toggle {
@@ -146,11 +146,11 @@
 :where(.history-actions button, .history-export, .history-presets button):disabled { opacity: .55; cursor: default; }
 
 @container (max-width: 820px) {
+  .history-year-bar > .history-export { flex-basis: 100%; }
   .history-row { grid-template-columns: auto minmax(0, 1fr) 11ch; }
   .history-actions { grid-column: 1 / -1; }
 }
 
 @media (max-width: 900px) {
-  .history-year-bar > .history-export { flex-basis: 100%; }
   .history-export-primary { margin-left: 0; }
 }

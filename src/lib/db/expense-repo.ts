@@ -249,6 +249,13 @@ function toExpenseListItem(row: {
 
 type ExpenseListRow = Parameters<typeof toExpenseListItem>[0];
 
+function toExpenseSummaryReport(row: ExpenseListRow): ExpenseSummaryReport {
+  if (row.status !== 'finalized') {
+    throw new Error(`Expected finalized expense report ${row.id}, got ${row.status}.`);
+  }
+  return { ...toExpenseListItem(row), status: 'finalized' };
+}
+
 export async function listExpenseYears(db: Db): Promise<number[]> {
   const rows = await db.select<{ year: number }>(
     `SELECT DISTINCT CAST(substr(report_date, 1, 4) AS INTEGER) AS year
@@ -273,10 +280,10 @@ export async function expenseYearRollup(db: Db, year: number): Promise<ExpenseRo
 export async function listExpensesForYear(db: Db, year: number): Promise<ExpenseListItem[]> {
   const rows = await db.select<ExpenseListRow>(
     `SELECT id, year, seq, report_date, total_cents, status
-       FROM expense_reports
+      FROM expense_reports
       WHERE status = 'finalized'
         AND CAST(substr(report_date, 1, 4) AS INTEGER) = ?
-      ORDER BY seq ASC`,
+      ORDER BY report_date DESC, year DESC, seq ASC`,
     [year],
   );
   return rows.map(toExpenseListItem);
@@ -285,9 +292,9 @@ export async function listExpensesForYear(db: Db, year: number): Promise<Expense
 export async function listFinalizedExpenses(db: Db): Promise<ExpenseListItem[]> {
   const rows = await db.select<ExpenseListRow>(
     `SELECT id, year, seq, report_date, total_cents, status
-       FROM expense_reports
+      FROM expense_reports
       WHERE status = 'finalized'
-      ORDER BY year DESC, seq ASC`,
+      ORDER BY report_date DESC, year DESC, seq ASC`,
   );
   return rows.map(toExpenseListItem);
 }
@@ -304,7 +311,7 @@ export async function searchExpenses(db: Db, query: string): Promise<ExpenseList
             er.report_date LIKE ?
          OR (er.seq || '-' || er.year) LIKE ?
          OR ei.description LIKE ?)
-      ORDER BY er.year DESC, er.seq ASC`,
+      ORDER BY er.report_date DESC, er.year DESC, er.seq ASC`,
     [like, like, like],
   );
   return rows.map(toExpenseListItem);
@@ -314,7 +321,7 @@ export async function listVoidedExpenses(db: Db): Promise<ExpenseListItem[]> {
   const rows = await db.select<ExpenseListRow>(
     `SELECT id, year, seq, report_date, total_cents, status
        FROM expense_reports WHERE status = 'void'
-      ORDER BY year DESC, seq ASC`,
+      ORDER BY report_date DESC, year DESC, seq ASC`,
   );
   return rows.map(toExpenseListItem);
 }
@@ -372,7 +379,7 @@ export async function expenseSummaryForRange(
     ),
   ]);
 
-  const reports = reportRows.map(toExpenseListItem) as ExpenseSummaryReport[];
+  const reports = reportRows.map(toExpenseSummaryReport);
   const items: ExpenseSummaryItemRow[] = itemRows.map((row) => ({
     reportId: row.report_id,
     reportNumber: `${row.report_seq}-${row.report_year}`,

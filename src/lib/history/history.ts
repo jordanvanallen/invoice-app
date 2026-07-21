@@ -68,8 +68,14 @@ export function groupHistoryRows<T>(
 ): HistoryGroup<T>[] {
   const groups = new Map<number, T[]>();
   for (const row of rows) {
-    const year = Number(dateOf(row).slice(0, 4));
-    groups.set(year, [...(groups.get(year) ?? []), row]);
+    const date = dateOf(row);
+    const year = isValidIsoDate(date) ? Number(date.slice(0, 4)) : 0;
+    let group = groups.get(year);
+    if (!group) {
+      group = [];
+      groups.set(year, group);
+    }
+    group.push(row);
   }
   return [...groups.entries()]
     .sort(([left], [right]) => right - left)
@@ -138,5 +144,42 @@ export function createLatestRequestGate(): {
   return {
     begin: () => ++latest,
     isCurrent: (requestId: number) => requestId === latest,
+  };
+}
+
+export type HistorySearchStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+export interface HistorySearchSnapshot<T> {
+  status: HistorySearchStatus;
+  rows: T[];
+  error: string;
+}
+
+/** Latest-request-wins search lifecycle shared by both history routes. */
+export function createHistorySearchLifecycle<T>(
+  publish: (snapshot: HistorySearchSnapshot<T>) => void,
+): {
+  clear: () => void;
+  run: (search: () => Promise<T[]>) => Promise<void>;
+} {
+  let latest = 0;
+  const emit = (status: HistorySearchStatus, rows: T[] = [], error = '') => {
+    publish({ status, rows, error });
+  };
+  return {
+    clear() {
+      latest += 1;
+      emit('idle');
+    },
+    async run(search) {
+      const requestId = ++latest;
+      emit('loading');
+      try {
+        const rows = await search();
+        if (requestId === latest) emit('ready', rows);
+      } catch (error) {
+        if (requestId === latest) emit('error', [], (error as Error).message);
+      }
+    },
   };
 }

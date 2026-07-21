@@ -51,7 +51,7 @@ export function formatIsoDate(value: string): string {
 }
 
 export type InvoiceFinalizeField =
-  | 'invoice' | 'inspectionNumber' | 'client' | 'location' | 'date' | 'vin8'
+  | 'invoice' | 'issueDate' | 'inspectionNumber' | 'client' | 'location' | 'date' | 'vin8'
   | 'mileageApprover' | 'mileageApprovalDate';
 
 export interface InvoiceFinalizeBlocker {
@@ -60,7 +60,7 @@ export interface InvoiceFinalizeBlocker {
   message: string;
 }
 
-type LineFinalizeField = Exclude<InvoiceFinalizeField, 'invoice'>;
+type LineFinalizeField = Exclude<InvoiceFinalizeField, 'invoice' | 'issueDate'>;
 interface LineFinalizeBlocker extends InvoiceFinalizeBlocker {
   lineIndex: number;
   field: LineFinalizeField;
@@ -103,10 +103,16 @@ function lineFinalizeBlockers(line: LineItem, lineIndex: number): LineFinalizeBl
 }
 
 export function invoiceFinalizeBlockers(draft: DraftInvoice): InvoiceFinalizeBlocker[] {
+  const headerBlockers: InvoiceFinalizeBlocker[] = isValidIsoDate(draft.issueDate)
+    ? []
+    : [{ lineIndex: null, field: 'issueDate', message: 'Choose a valid invoice date.' }];
   if (draft.lines.length === 0) {
-    return [{ lineIndex: null, field: 'invoice', message: 'Add at least one invoice row.' }];
+    return [
+      ...headerBlockers,
+      { lineIndex: null, field: 'invoice', message: 'Add at least one invoice row.' },
+    ];
   }
-  return draft.lines.flatMap(lineFinalizeBlockers);
+  return [...headerBlockers, ...draft.lines.flatMap(lineFinalizeBlockers)];
 }
 
 const FINALIZE_FIELD_LABELS: Record<LineFinalizeField, string> = {

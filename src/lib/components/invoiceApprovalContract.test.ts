@@ -268,4 +268,13 @@ describe('invoice approval component contracts', () => {
     expect(jumpHandler).toContain('document.getElementById(targetId)?.focus();');
     expect(jumpHandler).not.toContain("querySelector('input')");
   });
+
+  test('invoice-date finalization errors are visible and keyboard focusable', () => {
+    const route = readSource('src/routes/+page.svelte');
+    expect(route).toContain("const issueDateBlocker = $derived(finalizeBlockers.find((blocker) => blocker.field === 'issueDate'))");
+    expect(route).toContain('fieldId="invoice-date"');
+    expect(route).toContain('invalid={!!issueDateBlocker}');
+    expect(route).toContain("document.getElementById('invoice-date')?.focus()");
+    expect(route).toContain('Fix the invoice date to finish');
+  });
 });

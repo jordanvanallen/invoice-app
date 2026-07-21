@@ -11,6 +11,7 @@
     end?: string;
     exportLabel: string;
     busyLabel?: string;
+    actionLocked?: boolean;
     onExport: () => void | Promise<void>;
   }
 
@@ -19,6 +20,7 @@
     end = $bindable(''),
     exportLabel,
     busyLabel = '',
+    actionLocked = false,
     onExport,
   }: Props = $props();
 
@@ -69,7 +71,7 @@
       ariaLabel="From date"
       bind:value={start}
       invalid={resolution.kind === 'invalid'}
-      errorId={errorId}
+      errorId={resolution.kind === 'invalid' ? errorId : ''}
     />
   </div>
 
@@ -80,14 +82,14 @@
       ariaLabel="To date"
       bind:value={end}
       invalid={resolution.kind === 'invalid'}
-      errorId={errorId}
+      errorId={resolution.kind === 'invalid' ? errorId : ''}
     />
   </div>
 
   <button
     type="button"
     class="history-export history-export-primary"
-    disabled={resolution.kind === 'invalid' || !!busyLabel}
+    disabled={resolution.kind === 'invalid' || actionLocked}
     onclick={onExport}
   >{busyLabel || exportLabel}</button>
 
