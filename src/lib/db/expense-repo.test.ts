@@ -246,6 +246,8 @@ describe('expense history and lifecycle', () => {
 
     expect((await listExpensesForYear(db, 2026)).map((report) => report.reportNumber))
       .toEqual(['1-2026', '2-2026', '3-2026']);
+    expect((await listFinalizedExpenses(db)).map((report) => report.reportNumber))
+      .toEqual(['1-2026', '2-2026', '3-2026', '1-2025']);
     expect((await searchExpenses(db, 'History order')).map((report) => report.reportNumber))
       .toEqual(['1-2026', '2-2026', '3-2026', '1-2025']);
 
