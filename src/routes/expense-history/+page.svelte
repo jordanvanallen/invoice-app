@@ -2,87 +2,179 @@
   import { onMount, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import BigButton from '$lib/components/BigButton.svelte';
+  import HistoryRangeControls from '$lib/components/HistoryRangeControls.svelte';
   import { getDb } from '$lib/db';
   import {
     duplicateExpenseReport,
-    expenseYearRollup,
-    listExpensesForYear,
-    listExpenseYears,
+    expenseSummaryForRange,
+    listFinalizedExpenses,
     listVoidedExpenses,
     reprintExpenseSnapshot,
     restoreExpenseReport,
     searchExpenses,
   } from '$lib/db/expense-repo';
-  import type { ExpenseListItem, ExpenseRollup } from '$lib/expense/types';
+  import type { ExpenseListItem } from '$lib/expense/types';
+  import {
+    calendarYearRange,
+    createLatestRequestGate,
+    filterHistoryRows,
+    groupHistoryRows,
+    historyRangeLabel,
+    partitionHistoryRows,
+    resolveHistoryRange,
+    sumExpenseHistory,
+    type ClosedDateRange,
+  } from '$lib/history/history';
   import { formatDollars } from '$lib/money';
-  import { saveExpensePdf } from '$lib/pdf/generate';
+  import { saveExpensePdf, saveExpenseSummaryPdf } from '$lib/pdf/generate';
+  import { loadSettings } from '$lib/stores/settings';
   import { showSaveToast } from '$lib/stores/toast';
-  import { defaultInvoicePeriod } from '$lib/ui/date';
+  import { defaultInvoicePeriod, toIsoDate } from '$lib/ui/date';
+  import '$lib/styles/history.css';
 
-  interface ExpenseGroup {
-    year: number;
-    rollup: ExpenseRollup;
-    reports: ExpenseListItem[];
-    open: boolean;
-  }
+  type LoadState = 'loading' | 'ready' | 'error';
+  type SearchState = 'idle' | 'loading' | 'ready' | 'error';
 
-  let loaded = $state(false);
-  let groups = $state<ExpenseGroup[]>([]);
+  let loadState = $state<LoadState>('loading');
+  let loadError = $state('');
+  let finalized = $state<ExpenseListItem[]>([]);
   let cancelled = $state<ExpenseListItem[]>([]);
-  let cancelledOpen = $state(false);
   let query = $state('');
-  let results = $state<ExpenseListItem[]>([]);
+  let searchRows = $state<ExpenseListItem[]>([]);
+  let searchState = $state<SearchState>('idle');
+  let openYears = $state<Record<number, boolean>>({});
+  let cancelledOpen = $state(false);
+  let cancelledToggle = $state<HTMLButtonElement>();
+  let rangeStart = $state('');
+  let rangeEnd = $state('');
   let busyAction = $state('');
   let errorMessage = $state('');
-  const searching = $derived(query.trim().length > 0);
+  const searchGate = createLatestRequestGate();
+  const currentYear = new Date().getFullYear();
 
-  async function loadAll() {
-    const db = await getDb();
-    const years = await listExpenseYears(db);
-    const nextGroups: ExpenseGroup[] = [];
-    for (const year of years) {
-      const [rollup, reports] = await Promise.all([
-        expenseYearRollup(db, year),
-        listExpensesForYear(db, year),
-      ]);
-      nextGroups.push({ year, rollup, reports, open: true });
-    }
-    groups = nextGroups;
-    cancelled = await listVoidedExpenses(db);
+  const searching = $derived(query.trim().length > 0);
+  const resolution = $derived(resolveHistoryRange(rangeStart, rangeEnd));
+  const rangedFinalized = $derived(filterHistoryRows(
+    finalized,
+    (report) => report.reportDate,
+    resolution.range,
+  ));
+  const rangedCancelled = $derived(filterHistoryRows(
+    cancelled,
+    (report) => report.reportDate,
+    resolution.range,
+  ));
+  const grouped = $derived(groupHistoryRows(rangedFinalized, (report) => report.reportDate).map((group) => ({
+    year: group.year,
+    reports: group.rows,
+    rollup: sumExpenseHistory(group.rows),
+  })));
+  const currentYearRollup = $derived(sumExpenseHistory(
+    rangedFinalized.filter((report) => report.reportDate.startsWith(`${currentYear}-`)),
+  ));
+  const rangedSearchRows = $derived(filterHistoryRows(
+    searchRows,
+    (report) => report.reportDate,
+    resolution.range,
+  ));
+  const searchParts = $derived(partitionHistoryRows(rangedSearchRows));
+  const visibleCancelled = $derived(searching ? searchParts.void : rangedCancelled);
+  const hasSourceRecords = $derived(finalized.length > 0 || cancelled.length > 0);
+
+  function isYearOpen(year: number): boolean {
+    return openYears[year] ?? true;
   }
 
-  onMount(async () => {
-    try { await loadAll(); } catch (error) { errorMessage = (error as Error).message; }
-    loaded = true;
+  function toggleYear(year: number): void {
+    openYears = { ...openYears, [year]: !isYearOpen(year) };
+  }
+
+  async function loadAll(): Promise<void> {
+    const db = await getDb();
+    const [nextFinalized, nextCancelled] = await Promise.all([
+      listFinalizedExpenses(db),
+      listVoidedExpenses(db),
+    ]);
+    finalized = nextFinalized;
+    cancelled = nextCancelled;
+    const nextOpenYears: Record<number, boolean> = {};
+    for (const group of groupHistoryRows(nextFinalized, (report) => report.reportDate)) {
+      nextOpenYears[group.year] = openYears[group.year] ?? true;
+    }
+    openYears = nextOpenYears;
+  }
+
+  async function loadPage(): Promise<void> {
+    loadState = 'loading';
+    loadError = '';
+    try {
+      await loadAll();
+      loadState = 'ready';
+    } catch (error) {
+      loadError = (error as Error).message;
+      loadState = 'error';
+    }
+  }
+
+  onMount(() => {
+    void loadPage();
   });
+
+  async function executeSearch(value: string): Promise<void> {
+    const requestId = searchGate.begin();
+    searchRows = [];
+    searchState = 'loading';
+    errorMessage = '';
+    try {
+      const rows = await searchExpenses(await getDb(), value);
+      if (!searchGate.isCurrent(requestId)) return;
+      searchRows = rows;
+      searchState = 'ready';
+    } catch (error) {
+      if (!searchGate.isCurrent(requestId)) return;
+      searchState = 'error';
+      errorMessage = (error as Error).message;
+    }
+  }
 
   $effect(() => {
     const value = query.trim();
-    if (!value) { results = []; return; }
-    let active = true;
-    getDb()
-      .then((db) => searchExpenses(db, value))
-      .then((matches) => { if (active) results = matches; })
-      .catch((error) => { if (active) errorMessage = (error as Error).message; });
-    return () => { active = false; };
+    if (!value) {
+      searchGate.begin();
+      searchRows = [];
+      searchState = 'idle';
+      return;
+    }
+    void executeSearch(value);
   });
 
-  async function runAction(key: string, action: () => Promise<void>) {
+  $effect(() => {
+    if (searching && searchState === 'ready' && visibleCancelled.length > 0) {
+      cancelledOpen = true;
+    }
+  });
+
+  async function runAction(key: string, action: () => Promise<void>): Promise<void> {
     if (busyAction) return;
     busyAction = key;
     errorMessage = '';
-    try { await action(); } catch (error) { errorMessage = (error as Error).message; }
-    finally { busyAction = ''; }
+    try {
+      await action();
+    } catch (error) {
+      errorMessage = (error as Error).message;
+    } finally {
+      busyAction = '';
+    }
   }
 
-  function downloadPdf(report: ExpenseListItem) {
+  function downloadPdf(report: ExpenseListItem): Promise<void> {
     return runAction(`pdf-${report.id}`, async () => {
       const snapshot = await reprintExpenseSnapshot(await getDb(), report.id);
       showSaveToast(await saveExpensePdf(snapshot));
     });
   }
 
-  function duplicate(report: ExpenseListItem) {
+  function duplicate(report: ExpenseListItem): Promise<void> {
     return runAction(`duplicate-${report.id}`, async () => {
       const defaults = defaultInvoicePeriod();
       await duplicateExpenseReport(await getDb(), report.id, {
@@ -95,139 +187,233 @@
     });
   }
 
-  function restore(report: ExpenseListItem) {
+  function restore(report: ExpenseListItem): Promise<void> {
     return runAction(`restore-${report.id}`, async () => {
       await restoreExpenseReport(await getDb(), report.id);
       await loadAll();
+      const value = query.trim();
+      if (value) await executeSearch(value);
     });
   }
 
-  async function showCancelled() {
+  async function showCancelled(): Promise<void> {
     cancelledOpen = true;
     await tick();
-    document.getElementById('cancelled-expenses')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.getElementById('cancelled-expense-reports')?.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
+    cancelledToggle?.focus();
+  }
+
+  async function saveExpenseRangeSummary(
+    range: ClosedDateRange | null,
+    rangeLabel: string,
+    fileName: string,
+  ): Promise<void> {
+    const [summary, settings] = await Promise.all([
+      expenseSummaryForRange(await getDb(), range),
+      loadSettings(),
+    ]);
+    if (summary.reports.length === 0) {
+      throw new Error('No finalized expense reports exist in that date range.');
+    }
+    showSaveToast(await saveExpenseSummaryPdf({
+      rangeLabel,
+      preparedOn: toIsoDate(new Date()),
+      businessName: settings.inspectorName || 'My business',
+      reports: summary.reports,
+      items: summary.items,
+    }, fileName));
+  }
+
+  function exportRange(): Promise<void> {
+    return runAction('range-export', async () => {
+      const resolution = resolveHistoryRange(rangeStart, rangeEnd);
+      if (resolution.kind === 'invalid') return;
+      const range = resolution.range ? Object.freeze({ ...resolution.range }) : null;
+      const rangeLabel = historyRangeLabel(range);
+      const fileName = range
+        ? `Expense-Summary-${range.start}_to_${range.end}.pdf`
+        : 'Expense-Summary-All-Time.pdf';
+      await saveExpenseRangeSummary(range, rangeLabel, fileName);
+    });
+  }
+
+  function exportYear(year: number): Promise<void> {
+    return runAction(`year-export-${year}`, async () => {
+      const range = calendarYearRange(year);
+      await saveExpenseRangeSummary(
+        range,
+        historyRangeLabel(range, year),
+        `Expense-Summary-${year}.pdf`,
+      );
+    });
   }
 </script>
 
-<div class="head">
-  <div><h1>Expense History</h1><p>Finalized expense reports, kept separately from invoices.</p></div>
-  {#if cancelled.length}
-    <button class="cancelled-button" onclick={showCancelled}>
-      Cancelled expense reports ({cancelled.length})
-    </button>
+<div class="history-head">
+  <div>
+    <h1>Expense History</h1>
+    <p>Finalized expense reports, kept separately from invoices.</p>
+  </div>
+  {#if visibleCancelled.length > 0}
+    <button
+      class="history-cancelled-shortcut"
+      onclick={showCancelled}
+      aria-controls="cancelled-expense-reports"
+    >Cancelled expense reports ({visibleCancelled.length})</button>
   {/if}
 </div>
 
-{#if errorMessage}<p class="error" role="alert">{errorMessage}</p>{/if}
+{#if errorMessage}
+  <p class="history-error" role="alert">{errorMessage}</p>
+{/if}
 
 {#snippet reportRow(report: ExpenseListItem, allowRestore = false)}
-  <li>
-    <button class="number" onclick={() => goto(`/expense/${report.id}`)}
-      title="View expense report #{report.reportNumber}">#{report.reportNumber}</button>
-    <span class="date">{report.reportDate}</span>
-    <span class="row-total tnum">{formatDollars(report.totalCents)}</span>
-    <span class="row-actions">
+  <li class="history-row">
+    <button
+      class="history-number"
+      onclick={() => goto(`/expense/${report.id}`)}
+      title="View expense report #{report.reportNumber}"
+    >#{report.reportNumber}</button>
+    <span class="history-date">{report.reportDate}</span>
+    <span class="history-amount tnum">{formatDollars(report.totalCents)}</span>
+    <span class="history-actions">
       {#if allowRestore}
-        <button class="primary" disabled={!!busyAction} onclick={() => restore(report)}>
-          {busyAction === `restore-${report.id}` ? 'Restoring...' : 'Restore'}
-        </button>
+        <button
+          class="primary"
+          disabled={!!busyAction}
+          onclick={() => restore(report)}
+        >{busyAction === `restore-${report.id}` ? 'Restoring…' : 'Restore'}</button>
       {/if}
-      <button disabled={!!busyAction} onclick={() => goto(`/expense/${report.id}`)}>View</button>
+      <button onclick={() => goto(`/expense/${report.id}`)}>View</button>
       {#if !allowRestore}
         <button disabled={!!busyAction} onclick={() => downloadPdf(report)}>
-          {busyAction === `pdf-${report.id}` ? 'Saving...' : 'Download PDF'}
+          {busyAction === `pdf-${report.id}` ? 'Saving…' : 'Download PDF'}
         </button>
         <button disabled={!!busyAction} onclick={() => duplicate(report)}>
-          {busyAction === `duplicate-${report.id}` ? 'Opening...' : 'Duplicate'}
+          {busyAction === `duplicate-${report.id}` ? 'Opening…' : 'Duplicate'}
         </button>
       {/if}
     </span>
   </li>
 {/snippet}
 
-{#if !loaded}
-  <p class="muted">Loading...</p>
-{:else if groups.length === 0 && cancelled.length === 0}
-  <div class="empty">
+{#if loadState === 'loading'}
+  <p class="history-status" role="status">Loading expense history…</p>
+{:else if loadState === 'error'}
+  <div class="history-empty">
+    <p class="history-error" role="alert">Could not load expense history: {loadError}</p>
+    <button class="history-export" onclick={loadPage}>Retry</button>
+  </div>
+{:else if !hasSourceRecords}
+  <div class="history-empty">
     <p>No expense reports yet.</p>
     <BigButton onclick={() => goto('/expenses')}>Make your first expense report</BigButton>
   </div>
 {:else}
-  {#if groups.length}
-    <div class="search">
-      <input type="search" bind:value={query} aria-label="Search expense reports"
-        placeholder="Search by report number, date, or description" />
-      {#if searching}<button onclick={() => (query = '')}>Clear</button>{/if}
+  {#if currentYearRollup.count > 0}
+    <div class="history-current-summary">
+      <strong>{currentYear} so far</strong>
+      <span><b>{currentYearRollup.count}</b> {currentYearRollup.count === 1 ? 'report' : 'reports'}</span>
+      <span class="tnum"><b>{formatDollars(currentYearRollup.totalCents)}</b> total expenses</span>
     </div>
   {/if}
 
+  <div class="history-search" aria-busy={searchState === 'loading'}>
+    <input
+      type="search"
+      bind:value={query}
+      aria-label="Search finalized and cancelled expense reports"
+      placeholder="Search finalized expense reports — number, date, or description"
+    />
+    {#if searching}<button onclick={() => (query = '')}>Clear</button>{/if}
+  </div>
+
+  <HistoryRangeControls
+    bind:start={rangeStart}
+    bind:end={rangeEnd}
+    exportLabel="Export expense summary"
+    busyLabel={busyAction === 'range-export' ? 'Exporting…' : ''}
+    onExport={exportRange}
+  />
+
   {#if searching}
-    {#if results.length}
-      <ul>{#each results as report (report.id)}{@render reportRow(report)}{/each}</ul>
-    {:else}
-      <p class="muted">No expense reports match "{query}".</p>
+    {#if searchState === 'loading'}
+      <p class="history-status" role="status">Searching…</p>
+    {:else if searchState === 'ready'}
+      {#if searchParts.finalized.length > 0}
+        <ul class="history-list">
+          {#each searchParts.finalized as report (report.id)}
+            {@render reportRow(report)}
+          {/each}
+        </ul>
+      {:else}
+        <p class="history-status">No active expense reports match “{query}”.</p>
+      {/if}
     {/if}
-  {:else}
-    {#each groups as group (group.year)}
-      <section class="year">
-        <button class="year-head" onclick={() => (group.open = !group.open)} aria-expanded={group.open}>
-          <span class="year-label">{group.open ? '▾' : '▸'} {group.year}</span>
-          <span class="chips">
-            <span>{group.rollup.count} {group.rollup.count === 1 ? 'report' : 'reports'}</span>
-            <span class="tnum">{formatDollars(group.rollup.totalCents)} total</span>
-          </span>
-        </button>
-        {#if group.open}
-          <ul>{#each group.reports as report (report.id)}{@render reportRow(report)}{/each}</ul>
+  {:else if grouped.length > 0}
+    {#each grouped as group (group.year)}
+      <section class="history-year">
+        <div class="history-year-bar">
+          <button
+            class="history-year-toggle"
+            onclick={() => toggleYear(group.year)}
+            aria-expanded={isYearOpen(group.year)}
+            aria-controls={`expense-year-${group.year}`}
+          >
+            <span class="history-year-label">
+              <span aria-hidden="true">{isYearOpen(group.year) ? '▾' : '▸'}</span> {group.year}
+            </span>
+            <span class="history-chips">
+              <span class="history-chip">{group.rollup.count} {group.rollup.count === 1 ? 'report' : 'reports'}</span>
+              <span class="history-chip tnum">{formatDollars(group.rollup.totalCents)} total</span>
+            </span>
+          </button>
+          <button
+            class="history-export"
+            disabled={!!busyAction}
+            onclick={() => exportYear(group.year)}
+          >{busyAction === `year-export-${group.year}` ? 'Exporting…' : `Export ${group.year} summary`}</button>
+        </div>
+        {#if isYearOpen(group.year)}
+          <ul class="history-list" id={`expense-year-${group.year}`}>
+            {#each group.reports as report (report.id)}
+              {@render reportRow(report)}
+            {/each}
+          </ul>
         {/if}
       </section>
     {/each}
+  {:else}
+    <p class="history-status">No active expense reports fall within this date range.</p>
   {/if}
 
-  {#if cancelled.length}
-    <section class="year cancelled" id="cancelled-expenses">
-      <button class="year-head" onclick={() => (cancelledOpen = !cancelledOpen)} aria-expanded={cancelledOpen}>
-        <span class="year-label">{cancelledOpen ? '▾' : '▸'} Cancelled expense reports</span>
-        <span class="chips"><span>{cancelled.length} cancelled</span></span>
+  {#if visibleCancelled.length > 0}
+    <section class="history-year history-cancelled" id="cancelled-expense-reports">
+      <button
+        class="history-year-toggle"
+        bind:this={cancelledToggle}
+        onclick={() => (cancelledOpen = !cancelledOpen)}
+        aria-expanded={cancelledOpen}
+        aria-controls="cancelled-expense-list"
+      >
+        <span class="history-year-label">
+          <span aria-hidden="true">{cancelledOpen ? '▾' : '▸'}</span> Cancelled expense reports
+        </span>
+        <span class="history-chips">
+          <span class="history-chip">{visibleCancelled.length} cancelled</span>
+        </span>
       </button>
       {#if cancelledOpen}
-        <ul>{#each cancelled as report (report.id)}{@render reportRow(report, true)}{/each}</ul>
+        <ul class="history-list" id="cancelled-expense-list">
+          {#each visibleCancelled as report (report.id)}
+            {@render reportRow(report, true)}
+          {/each}
+        </ul>
       {/if}
     </section>
   {/if}
 {/if}
-
-<style>
-  .head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-6); }
-  h1 { margin: 0; font-size: var(--fs-xl); }
-  .head p, .muted { margin: var(--sp-1) 0 0; color: var(--text-secondary); }
-  .cancelled-button { min-height: var(--target); padding: 0 var(--sp-4); border: 1px solid var(--red-600); color: var(--red-600); background: transparent; border-radius: var(--r-sm); font-weight: 600; cursor: pointer; }
-  .cancelled-button:hover { color: #fff; background: var(--red-600); }
-  .error { padding: var(--sp-3) var(--sp-4); color: var(--red-600); background: var(--bg-surface); border: 1px solid var(--red-600); border-radius: var(--r-sm); }
-  .empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-4); color: var(--text-secondary); }
-  .search { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-6); }
-  .search input { flex: 1; min-height: var(--target); padding: 0 var(--sp-4); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); }
-  .search button { min-height: var(--target); padding: 0 var(--sp-4); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); cursor: pointer; }
-  .year { margin-bottom: var(--sp-6); }
-  .cancelled { margin-top: var(--sp-8); }
-  .year-head { width: 100%; min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-surface); cursor: pointer; }
-  .year-label { font-size: var(--fs-lg); font-weight: 700; }
-  .cancelled .year-label { color: var(--text-muted); }
-  .chips { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
-  .chips span { padding: 2px var(--sp-3); border-radius: var(--r-full); background: var(--bg-sunken); color: var(--text-secondary); font-size: var(--fs-sm); }
-  ul { container-type: inline-size; list-style: none; margin: var(--sp-2) 0 0; padding: 0; }
-  li { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: var(--sp-4); min-height: 64px; padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--border); }
-  .number { border: 0; background: transparent; color: var(--accent-strong); font-weight: 700; cursor: pointer; }
-  .number:hover { text-decoration: underline; }
-  .date { color: var(--text-secondary); }
-  .row-total { font-weight: 700; }
-  .row-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
-  .row-actions button { min-height: 44px; padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--accent-strong); font-weight: 600; cursor: pointer; }
-  .row-actions button:hover:not(:disabled) { background: var(--accent-tint); }
-  .row-actions button.primary { color: #fff; background: var(--accent-fill); border-color: var(--accent-fill); }
-  .row-actions button:disabled { opacity: .55; cursor: default; }
-  @container (max-width: 820px) {
-    li { grid-template-columns: auto 1fr auto; }
-    .row-actions { grid-column: 1 / -1; }
-  }
-</style>
