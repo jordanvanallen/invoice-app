@@ -1,7 +1,8 @@
 import { test, expect, describe } from 'vitest';
-import { expensePdfBytes, invoicePdfBytes, summaryPdfBytes } from './generate';
+import { expensePdfBytes, expenseSummaryPdfBytes, invoicePdfBytes, summaryPdfBytes } from './generate';
 import type { FinalizedSnapshot, LineItem } from '../types';
 import type { ExpenseSnapshot } from '../expense/types';
+import { expenseSummaryInput } from './expenseSummaryDoc.test';
 
 function line(over: Partial<LineItem> = {}): LineItem {
   return {
@@ -36,7 +37,7 @@ describe('invoicePdfBytes', () => {
 
   test('tax summary generates a non-empty PDF', async () => {
     const bytes = await summaryPdfBytes({
-      title: 'Tax Summary — 2026', note: 'From finalized invoices.',
+      rangeLabel: 'Calendar year 2026',
       preparedOn: '2026-06-08', businessName: 'Jane Tester',
       rollup: { count: 3, totalBilledCents: 87236, totalTaxCents: 10036 },
       breakdown: [{ clientName: 'Globex Finance', count: 2, subtotalCents: 7600 }],
@@ -56,6 +57,13 @@ describe('invoicePdfBytes', () => {
     };
 
     const bytes = await expensePdfBytes(expense);
+
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect(String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3])).toBe('%PDF');
+  });
+
+  test('expense summary generates a non-empty PDF', async () => {
+    const bytes = await expenseSummaryPdfBytes(expenseSummaryInput);
 
     expect(bytes.length).toBeGreaterThan(1000);
     expect(String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3])).toBe('%PDF');

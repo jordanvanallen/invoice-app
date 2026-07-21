@@ -6,6 +6,7 @@ import type { ExpenseSnapshot } from '../expense/types';
 import { buildInvoiceDoc } from './invoiceDoc';
 import { buildExpenseDoc } from './expenseDoc';
 import { buildSummaryDoc, type SummaryInput } from './yearSummaryDoc';
+import { buildExpenseSummaryDoc, type ExpenseSummaryInput } from './expenseSummaryDoc';
 import { getInvoiceFolder } from '../stores/prefs';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -69,6 +70,11 @@ export function summaryPdfBytes(input: SummaryInput): Promise<Uint8Array> {
   return docBytes(buildSummaryDoc(input));
 }
 
+/** Expense-history summary PDF bytes (exposed for tests). */
+export function expenseSummaryPdfBytes(input: ExpenseSummaryInput): Promise<Uint8Array> {
+  return docBytes(buildExpenseSummaryDoc(input));
+}
+
 export function saveInvoicePdf(snap: FinalizedSnapshot): Promise<SaveResult> {
   return savePdfDoc(buildInvoiceDoc(snap), `Invoice-${snap.invoiceNumber}.pdf`, `${snap.year}-invoices`);
 }
@@ -83,6 +89,13 @@ export function saveExpensePdf(snapshot: ExpenseSnapshot): Promise<SaveResult> {
 
 export function saveSummaryPdf(input: SummaryInput, fileName: string): Promise<SaveResult> {
   return savePdfDoc(buildSummaryDoc(input), fileName, 'tax-summaries');
+}
+
+export function saveExpenseSummaryPdf(
+  input: ExpenseSummaryInput,
+  fileName: string,
+): Promise<SaveResult> {
+  return savePdfDoc(buildExpenseSummaryDoc(input), fileName, 'expense-summaries');
 }
 
 /** Open a saved PDF in the system's default viewer; fall back to a file:// URL

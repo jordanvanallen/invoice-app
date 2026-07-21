@@ -5,8 +5,7 @@ const TEAL = '#0E7C7B';
 const MUTED = '#5A6663';
 
 export interface SummaryInput {
-  title: string;
-  note: string;
+  rangeLabel: string;
   preparedOn: string;
   businessName: string;
   rollup: YearRollup;
@@ -45,9 +44,9 @@ export function buildSummaryDoc(p: SummaryInput): Record<string, unknown> {
     pageMargins: [40, 40, 40, 50],
     defaultStyle: { fontSize: 10, color: '#1C2826' },
     content: [
-      { text: p.title, fontSize: 22, bold: true, color: TEAL },
+      { text: 'Tax Summary', fontSize: 22, bold: true, color: TEAL },
       { text: `${p.businessName} · prepared ${p.preparedOn}`, color: MUTED, margin: [0, 2, 0, 0] },
-      { text: p.note, color: MUTED, fontSize: 8, margin: [0, 2, 0, 12] },
+      { text: p.rangeLabel, color: MUTED, fontSize: 9, margin: [0, 2, 0, 12] },
       { table: { widths: ['*', 'auto'], body: summaryRows }, layout: 'lightHorizontalLines' },
       { text: 'By client', style: 'sectionHead', margin: [0, 16, 0, 4] },
       { table: { headerRows: 1, widths: ['*', 'auto', 'auto'], body: clientBody }, layout: 'lightHorizontalLines' },

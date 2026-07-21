@@ -85,8 +85,7 @@
     const breakdown = await yearClientBreakdown(db, g.year);
     const s = await loadSettings();
     showSaveToast(await saveSummaryPdf({
-      title: `Tax Summary — ${g.year}`,
-      note: 'From finalized invoices issued this calendar year.',
+      rangeLabel: `Calendar year ${g.year}`,
       preparedOn: iso(new Date()),
       businessName: s.inspectorName || 'My business', rollup: g.rollup, breakdown,
     }, `Tax-Summary-${g.year}.pdf`));
@@ -102,8 +101,7 @@
       loadSettings(),
     ]);
     showSaveToast(await saveSummaryPdf({
-      title: `Tax Summary — ${rangeStart} to ${rangeEnd}`,
-      note: 'From finalized invoices issued in this date range.',
+      rangeLabel: `${rangeStart} to ${rangeEnd}`,
       preparedOn: iso(new Date()),
       businessName: s.inspectorName || 'My business', rollup, breakdown,
     }, `Tax-Summary-${rangeStart}_to_${rangeEnd}.pdf`));
