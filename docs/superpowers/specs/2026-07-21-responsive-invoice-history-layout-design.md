@@ -204,13 +204,13 @@ Order item rows deterministically by item date, report year, report sequence, st
 - `status: 'finalized' | 'void'`; and
 - `taxCents: number`.
 
-Every history and search query/constructor that produces this type selects and maps those fields. New fixed-query repository operations load all finalized invoices and all void invoices in date/number order. The route no longer performs sequential per-year list/summary requests. Any retained year-list helper must exclude drafts explicitly.
+Every history and search query/constructor that produces this type selects and maps those fields. New fixed-query repository operations load finalized and void invoices with the newest year first and invoice numbers ascending within each year. Issue dates are display and filter data, not the primary history order. The route no longer performs sequential per-year list/summary requests. Any retained year-list helper must exclude drafts explicitly.
 
 Invoice search returns finalized and void rows and excludes drafts. Repository summary/client-breakdown functions support `null` or a closed range and remain responsible for line-level client aggregation.
 
 ### Expense History Read Model
 
-New fixed-query operations load all finalized reports and all void reports in date/number order. Search returns finalized and void reports while excluding drafts. The export repository operation accepts `null` or a closed report-date range and returns qualifying finalized headers plus all their items under the semantics above.
+New fixed-query operations load finalized and void reports with the newest year first and report numbers ascending within each year. Report dates are display and filter data, not the primary history order. Search returns finalized and void reports while excluding drafts. The export repository operation accepts `null` or a closed report-date range and returns qualifying finalized headers plus all their items under the semantics above.
 
 ### Shared Helpers and Styles
 

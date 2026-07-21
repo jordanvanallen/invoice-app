@@ -287,12 +287,12 @@ export async function listFinalizedInvoices(db: Db): Promise<InvoiceListItem[]> 
   return (await db.select<InvoiceListRow>(
     `SELECT id, year, seq, issue_date, total_cents, tax_cents, status
        FROM invoices WHERE status = 'finalized'
-      ORDER BY issue_date DESC, year DESC, seq ASC`,
+      ORDER BY year DESC, seq ASC`,
   )).map(toInvoiceListItem);
 }
 ```
 
-Update every retained list/search constructor to use the mapper. Search with `i.status IN ('finalized', 'void')`. For summary functions, build separate static SQL strings for `null` and bounded range so All time omits date predicates while every value remains parameterized. Keep the existing year wrappers for compatibility, but make `listYears` finalized-only.
+Update every retained list/search constructor to use the mapper. Order history and search results by newest year first, then sequence ascending; issue date remains filter/display data. Search with `i.status IN ('finalized', 'void')`. For summary functions, build separate static SQL strings for `null` and bounded range so All time omits date predicates while every value remains parameterized. Keep the existing year wrappers for compatibility, but make `listYears` finalized-only.
 
 - [ ] **Step 4: Run invoice repository tests and verify GREEN**
 

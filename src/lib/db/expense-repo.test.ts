@@ -225,7 +225,7 @@ describe('expense history and lifecycle', () => {
     expect((await listVoidedExpenses(db)).map((report) => report.reportNumber)).toEqual(['2-2026']);
   });
 
-  test('orders active, searched, and cancelled expense history by report date, then number', async () => {
+  test('orders active, searched, and cancelled expense history by number ascending within the year', async () => {
     const db = await freshDb();
     const third = await finalized(db, {
       seq: 3, reportDate: '2026-07-17',
@@ -241,15 +241,15 @@ describe('expense history and lifecycle', () => {
     });
 
     expect((await listExpensesForYear(db, 2026)).map((report) => report.reportNumber))
-      .toEqual(['3-2026', '2-2026', '1-2026']);
+      .toEqual(['1-2026', '2-2026', '3-2026']);
     expect((await searchExpenses(db, 'History order')).map((report) => report.reportNumber))
-      .toEqual(['3-2026', '2-2026', '1-2026']);
+      .toEqual(['1-2026', '2-2026', '3-2026']);
 
     await voidExpenseReport(db, first);
     await voidExpenseReport(db, second);
     await voidExpenseReport(db, third);
     expect((await listVoidedExpenses(db)).map((report) => report.reportNumber))
-      .toEqual(['3-2026', '2-2026', '1-2026']);
+      .toEqual(['1-2026', '2-2026', '3-2026']);
   });
 
   test('duplicates to a fresh editable draft and guards status transitions', async () => {
@@ -331,7 +331,7 @@ describe('expense history and lifecycle', () => {
     await createExpenseDraft(db, header({ reportDate: '2025-01-01', year: 2025 }));
 
     const rows = await listFinalizedExpenses(db);
-    expect(rows.map((report) => report.reportNumber)).toEqual(['2-2026', '1-2026']);
+    expect(rows.map((report) => report.reportNumber)).toEqual(['1-2026', '2-2026']);
     expect(rows.every((report) => report.status === 'finalized')).toBe(true);
   });
 

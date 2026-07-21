@@ -379,19 +379,19 @@ export async function listInvoicesForYear(db: Db, year: number): Promise<Invoice
     `SELECT id, year, seq, issue_date, total_cents, tax_cents, status
       FROM invoices
       WHERE status = 'finalized' AND CAST(substr(issue_date, 1, 4) AS INTEGER) = ?
-      ORDER BY issue_date DESC, year DESC, seq ASC`,
+      ORDER BY seq ASC`,
     [year],
   );
   return rows.map(toInvoiceListItem);
 }
 
-/** Every finalized invoice in descending issue-date order. */
+/** Every finalized invoice: newest year first, then invoice number ascending. */
 export async function listFinalizedInvoices(db: Db): Promise<InvoiceListItem[]> {
   const rows = await db.select<InvoiceListRow>(
     `SELECT id, year, seq, issue_date, total_cents, tax_cents, status
       FROM invoices
       WHERE status = 'finalized'
-      ORDER BY issue_date DESC, year DESC, seq ASC`,
+      ORDER BY year DESC, seq ASC`,
   );
   return rows.map(toInvoiceListItem);
 }
@@ -412,7 +412,7 @@ export async function searchInvoices(db: Db, query: string): Promise<InvoiceList
          OR li.location LIKE ?
          OR li.vin8 LIKE ?
          OR li.inspection_number LIKE ?)
-      ORDER BY i.issue_date DESC, i.year DESC, i.seq ASC`,
+      ORDER BY i.year DESC, i.seq ASC`,
     [like, like, like, like, like, like],
   );
   return rows.map(toInvoiceListItem);
@@ -562,12 +562,12 @@ export async function voidInvoice(db: Db, id: number): Promise<void> {
   await db.execute("UPDATE invoices SET status = 'void' WHERE id = ? AND status = 'finalized'", [id]);
 }
 
-/** Cancelled invoices: newest issue date first, then invoice number ascending. */
+/** Cancelled invoices: newest year first, then invoice number ascending. */
 export async function listVoided(db: Db): Promise<InvoiceListItem[]> {
   const rows = await db.select<InvoiceListRow>(
     `SELECT id, year, seq, issue_date, total_cents, tax_cents, status
        FROM invoices WHERE status = 'void'
-      ORDER BY issue_date DESC, year DESC, seq ASC`,
+      ORDER BY year DESC, seq ASC`,
   );
   return rows.map(toInvoiceListItem);
 }
