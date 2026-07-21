@@ -219,6 +219,22 @@ describe('invoice approval component contracts', () => {
     );
   });
 
+  test('invoice view uses a wide comfortable sheet with a compact mileage-table fallback', () => {
+    const view = readSource('src/lib/components/InvoiceView.svelte');
+
+    expect(view).toContain('max-width: 1040px');
+    expect(view).toContain('container-type: inline-size');
+    expect(view).toContain('table { width: 100%; border-collapse: collapse; }');
+    expect(view).toMatch(
+      /th, td \{[^}]*padding: var\(--sp-2\) var\(--sp-3\);[^}]*overflow-wrap: anywhere;/,
+    );
+    expect(view).toContain('.r { text-align: right; white-space: nowrap; }');
+    expect(view).toContain('@container (max-width: 860px)');
+    const compact = view.slice(view.indexOf('@container (max-width: 860px)'));
+    expect(compact).toContain('th, td { padding-inline: var(--sp-1); }');
+    expect(compact).toContain('td { font-size: var(--fs-sm); }');
+  });
+
   test('invoice route uses the declared preview prop without the temporary type bridge', () => {
     const route = readSource('src/routes/+page.svelte');
 

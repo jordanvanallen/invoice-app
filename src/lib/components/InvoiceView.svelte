@@ -92,8 +92,9 @@
 </article>
 
 <style>
-  .sheet { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-lg);
-    box-shadow: var(--shadow-card); padding: var(--sp-8); max-width: 820px; }
+  .sheet { width: 100%; max-width: 1040px; container-type: inline-size; background: var(--bg-surface);
+    border: 1px solid var(--border); border-radius: var(--r-lg);
+    box-shadow: var(--shadow-card); padding: var(--sp-8); }
   .top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-4); }
   .logo { max-width: 200px; max-height: 72px; object-fit: contain; display: block; margin-bottom: var(--sp-2); }
   .title { font-size: var(--fs-2xl); font-weight: 800; color: var(--accent-strong); letter-spacing: 1px; }
@@ -105,14 +106,18 @@
   .strong { font-weight: 700; }
   h3 { font-size: var(--fs-lg); font-weight: 600; color: var(--accent-strong); margin: var(--sp-6) 0 var(--sp-2); }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); }
+  th, td { text-align: left; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
   th { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .4px; color: var(--text-secondary); }
   .mileage-approval td { padding-top: var(--sp-1); color: var(--text-secondary); font-size: var(--fs-xs); font-style: italic; }
-  .r { text-align: right; }
+  .r { text-align: right; white-space: nowrap; }
   .totals { margin: var(--sp-6) 0 0; margin-left: auto; max-width: 360px; display: flex; flex-direction: column; gap: var(--sp-1); }
   .line { display: flex; justify-content: space-between; color: var(--text-secondary); padding: var(--sp-1) 0; }
   .grand { display: flex; justify-content: space-between; align-items: center; margin-top: var(--sp-2);
     padding: var(--sp-3) var(--sp-4); background: var(--accent-fill); color: #fff; border-radius: var(--r-md); font-size: var(--fs-xl); font-weight: 700; }
   footer { margin-top: var(--sp-8); border-top: 1px solid var(--border); padding-top: var(--sp-3); }
   .email { color: var(--accent-strong); font-weight: 600; }
+  @container (max-width: 860px) {
+    th, td { padding-inline: var(--sp-1); }
+    td { font-size: var(--fs-sm); }
+  }
 </style>
