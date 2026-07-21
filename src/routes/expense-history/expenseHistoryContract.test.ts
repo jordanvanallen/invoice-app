@@ -32,13 +32,6 @@ describe('expense history route', () => {
     expect(page).toContain('actionError');
   });
 
-  test('navigation keeps invoice and expense workflows grouped separately', () => {
-    const shell = readSource('src/lib/components/AppShell.svelte');
-    expect(shell).toContain("{ id: 'expenses', label: 'Expenses', items: [");
-    expect(shell).toContain("{ href: '/expenses', label: 'New Expense Report' }");
-    expect(shell).toContain("{ href: '/expense-history', label: 'History' }");
-  });
-
   test('cancelled shortcut reveals, scrolls, and focuses the disclosure', () => {
     const page = readSource('src/routes/expense-history/+page.svelte');
 

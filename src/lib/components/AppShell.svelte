@@ -38,7 +38,11 @@
           <ul aria-labelledby={`nav-group-${group.id}`}>
             {#each group.items as item}
               <li>
-                <a href={item.href} class:active={isActive(item.href, $page.url.pathname)}>{item.label}</a>
+                <a
+                  href={item.href}
+                  class:active={isActive(item.href, $page.url.pathname)}
+                  aria-current={isActive(item.href, $page.url.pathname) ? 'page' : undefined}
+                >{item.label}</a>
               </li>
             {/each}
           </ul>
@@ -61,9 +65,9 @@
   .shell { display:grid; grid-template-columns:calc(220px * var(--fs-scale)) 1fr; height:100vh; overflow:hidden; }
   nav { background:var(--bg-surface); border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; }
   .nav-groups { flex:1; min-height:0; overflow-y:auto; padding:var(--sp-3); }
-  .nav-group + .nav-group { margin-top:var(--sp-5); }
+  .nav-group + .nav-group { margin-top:var(--sp-6); }
   .nav-group h2 {
-    margin:0 0 var(--sp-1); padding:0 calc(var(--sp-4) + 4px); color:var(--text-muted);
+    margin:0 0 var(--sp-1); padding:0 calc(var(--sp-4) + 4px); color:var(--text-secondary);
     font-size:var(--fs-xs); font-weight:700; letter-spacing:.08em; text-transform:uppercase;
   }
   ul { list-style:none; margin:0; padding:0; }
