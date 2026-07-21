@@ -33,11 +33,9 @@ Add a focused test to `src/lib/components/AppShellContract.test.ts`:
 
 ```ts
 test('uses inset section bars without horizontal row dividers', () => {
-  expect(source).toContain('background:var(--bg-sunken);');
-  expect(source).toContain('border-radius:var(--r-sm);');
-  expect(source).toContain('padding:var(--sp-2) var(--sp-4);');
-  expect(source).toContain('border:0;');
-  expect(source).toContain('border-left:4px solid transparent;');
+  expect(source).toContain('margin:0 0 var(--sp-2); padding:var(--sp-2) var(--sp-4);');
+  expect(source).toContain('border-radius:var(--r-sm); background:var(--bg-sunken); color:var(--text-secondary);');
+  expect(source).toContain('border:0; border-left:4px solid transparent; border-radius:var(--r-sm);');
   expect(source).toContain('a.active { background:var(--accent-tint); border-left-color:var(--accent);');
 });
 ```
