@@ -1,291 +1,417 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { goto } from '$app/navigation';
-  import { getDb } from '$lib/db';
-  import { listYears, listInvoicesForYear, yearRollup, reprintSnapshot, duplicateInvoice, yearClientBreakdown, rangeRollup, rangeClientBreakdown, listVoided, unvoidInvoice, searchInvoices, type InvoiceListItem, type YearRollup } from '$lib/db/invoice-repo';
-  import { saveInvoicePdf, saveSummaryPdf } from '$lib/pdf/generate';
-  import { showSaveToast } from '$lib/stores/toast';
-  import { loadSettings } from '$lib/stores/settings';
-  import { formatDollars } from '$lib/money';
-  import { toIsoDate as iso, defaultInvoicePeriod } from '$lib/ui/date';
   import BigButton from '$lib/components/BigButton.svelte';
-  import DatePicker from '$lib/components/DatePicker.svelte';
+  import HistoryRangeControls from '$lib/components/HistoryRangeControls.svelte';
+  import { getDb } from '$lib/db';
+  import {
+    duplicateInvoice,
+    listFinalizedInvoices,
+    listVoided,
+    rangeClientBreakdown,
+    rangeRollup,
+    reprintSnapshot,
+    searchInvoices,
+    unvoidInvoice,
+    type InvoiceListItem,
+  } from '$lib/db/invoice-repo';
+  import {
+    calendarYearRange,
+    createLatestRequestGate,
+    filterHistoryRows,
+    groupHistoryRows,
+    historyRangeLabel,
+    partitionHistoryRows,
+    resolveHistoryRange,
+    sumInvoiceHistory,
+    type ClosedDateRange,
+  } from '$lib/history/history';
+  import { formatDollars } from '$lib/money';
+  import { saveInvoicePdf, saveSummaryPdf } from '$lib/pdf/generate';
+  import { loadSettings } from '$lib/stores/settings';
+  import { showSaveToast } from '$lib/stores/toast';
+  import { defaultInvoicePeriod, toIsoDate } from '$lib/ui/date';
+  import '$lib/styles/history.css';
 
-  interface Group { year: number; rollup: YearRollup; invoices: InvoiceListItem[]; open: boolean; }
-  let loaded = $state(false);
-  let groups = $state<Group[]>([]);
-  let voided = $state<InvoiceListItem[]>([]);
+  type LoadState = 'loading' | 'ready' | 'error';
+  type SearchState = 'idle' | 'loading' | 'ready' | 'error';
+
+  let loadState = $state<LoadState>('loading');
+  let loadError = $state('');
+  let finalized = $state<InvoiceListItem[]>([]);
+  let cancelled = $state<InvoiceListItem[]>([]);
+  let query = $state('');
+  let searchRows = $state<InvoiceListItem[]>([]);
+  let searchState = $state<SearchState>('idle');
+  let openYears = $state<Record<number, boolean>>({});
   let cancelledOpen = $state(false);
+  let cancelledToggle = $state<HTMLButtonElement>();
   let rangeStart = $state('');
   let rangeEnd = $state('');
-  let query = $state('');
-  let results = $state<InvoiceListItem[]>([]);
-  const searching = $derived(query.trim() !== '');
-
-  // Live search across finalized invoices (number, date, client, location, VIN, inspection #).
-  // The cancel flag drops a slow earlier query that resolves after a newer keystroke.
-  $effect(() => {
-    const q = query.trim();
-    if (!q) { results = []; return; }
-    let active = true;
-    getDb().then((db) => searchInvoices(db, q)).then((r) => { if (active) results = r; });
-    return () => { active = false; };
-  });
-
-  // Income at a glance: the current calendar year's totals.
+  let busyAction = $state('');
+  let errorMessage = $state('');
+  const searchGate = createLatestRequestGate();
   const currentYear = new Date().getFullYear();
-  const thisYearRollup = $derived(groups.find((g) => g.year === currentYear)?.rollup ?? null);
 
-  // Date-range presets for the tax-summary exporter.
-  function presetThisYear() { rangeStart = `${currentYear}-01-01`; rangeEnd = iso(new Date()); }
-  function presetLastYear() { rangeStart = `${currentYear - 1}-01-01`; rangeEnd = `${currentYear - 1}-12-31`; }
-  function presetThisQuarter() {
-    const now = new Date();
-    rangeStart = iso(new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1));
-    rangeEnd = iso(now);
+  const searching = $derived(query.trim().length > 0);
+  const resolution = $derived(resolveHistoryRange(rangeStart, rangeEnd));
+  const rangedFinalized = $derived(filterHistoryRows(
+    finalized,
+    (invoice) => invoice.issueDate,
+    resolution.range,
+  ));
+  const rangedCancelled = $derived(filterHistoryRows(
+    cancelled,
+    (invoice) => invoice.issueDate,
+    resolution.range,
+  ));
+  const grouped = $derived(groupHistoryRows(rangedFinalized, (invoice) => invoice.issueDate).map((group) => ({
+    year: group.year,
+    invoices: group.rows,
+    rollup: sumInvoiceHistory(group.rows),
+  })));
+  const currentYearRollup = $derived(sumInvoiceHistory(
+    rangedFinalized.filter((invoice) => invoice.issueDate.startsWith(`${currentYear}-`)),
+  ));
+  const rangedSearchRows = $derived(filterHistoryRows(
+    searchRows,
+    (invoice) => invoice.issueDate,
+    resolution.range,
+  ));
+  const searchParts = $derived(partitionHistoryRows(rangedSearchRows));
+  const visibleCancelled = $derived(searching ? searchParts.void : rangedCancelled);
+  const hasSourceRecords = $derived(finalized.length > 0 || cancelled.length > 0);
+
+  function isYearOpen(year: number): boolean {
+    return openYears[year] ?? true;
   }
 
-  async function loadAll() {
+  function toggleYear(year: number): void {
+    openYears = { ...openYears, [year]: !isYearOpen(year) };
+  }
+
+  async function loadAll(): Promise<void> {
     const db = await getDb();
-    const years = await listYears(db);
-    const gs: Group[] = [];
-    for (const y of years) {
-      gs.push({ year: y, rollup: await yearRollup(db, y), invoices: await listInvoicesForYear(db, y), open: true });
+    const [nextFinalized, nextCancelled] = await Promise.all([
+      listFinalizedInvoices(db),
+      listVoided(db),
+    ]);
+    finalized = nextFinalized;
+    cancelled = nextCancelled;
+    const nextOpenYears: Record<number, boolean> = {};
+    for (const group of groupHistoryRows(nextFinalized, (invoice) => invoice.issueDate)) {
+      nextOpenYears[group.year] = openYears[group.year] ?? true;
     }
-    groups = gs;
-    voided = await listVoided(db);
+    openYears = nextOpenYears;
   }
 
-  onMount(async () => {
-    const now = new Date();
-    rangeEnd = iso(now);
-    rangeStart = `${now.getFullYear()}-01-01`;
-    await loadAll();
-    loaded = true;
+  async function loadPage(): Promise<void> {
+    loadState = 'loading';
+    loadError = '';
+    try {
+      await loadAll();
+      loadState = 'ready';
+    } catch (error) {
+      loadError = (error as Error).message;
+      loadState = 'error';
+    }
+  }
+
+  onMount(() => {
+    void loadPage();
   });
 
-  async function restore(id: number) {
-    await unvoidInvoice(await getDb(), id);
-    await loadAll();
+  async function executeSearch(value: string): Promise<void> {
+    const requestId = searchGate.begin();
+    searchRows = [];
+    searchState = 'loading';
+    errorMessage = '';
+    try {
+      const rows = await searchInvoices(await getDb(), value);
+      if (!searchGate.isCurrent(requestId)) return;
+      searchRows = rows;
+      searchState = 'ready';
+    } catch (error) {
+      if (!searchGate.isCurrent(requestId)) return;
+      searchState = 'error';
+      errorMessage = (error as Error).message;
+    }
   }
 
-  // Reveal and scroll to the cancelled-invoices section so accidental
-  // cancellations can be found and undone.
-  async function showCancelled() {
+  $effect(() => {
+    const value = query.trim();
+    if (!value) {
+      searchGate.begin();
+      searchRows = [];
+      searchState = 'idle';
+      return;
+    }
+    void executeSearch(value);
+  });
+
+  $effect(() => {
+    if (searching && searchState === 'ready' && visibleCancelled.length > 0) {
+      cancelledOpen = true;
+    }
+  });
+
+  async function runAction(key: string, action: () => Promise<void>): Promise<void> {
+    if (busyAction) return;
+    busyAction = key;
+    errorMessage = '';
+    try {
+      await action();
+    } catch (error) {
+      errorMessage = (error as Error).message;
+    } finally {
+      busyAction = '';
+    }
+  }
+
+  function downloadPdf(invoice: InvoiceListItem): Promise<void> {
+    return runAction(`pdf-${invoice.id}`, async () => {
+      const snapshot = await reprintSnapshot(await getDb(), invoice.id);
+      showSaveToast(await saveInvoicePdf(snapshot));
+    });
+  }
+
+  function duplicate(invoice: InvoiceListItem): Promise<void> {
+    return runAction(`duplicate-${invoice.id}`, async () => {
+      await duplicateInvoice(await getDb(), invoice.id, defaultInvoicePeriod());
+      await goto('/');
+    });
+  }
+
+  function restore(invoice: InvoiceListItem): Promise<void> {
+    return runAction(`restore-${invoice.id}`, async () => {
+      await unvoidInvoice(await getDb(), invoice.id);
+      await loadAll();
+      const value = query.trim();
+      if (value) await executeSearch(value);
+    });
+  }
+
+  async function showCancelled(): Promise<void> {
     cancelledOpen = true;
     await tick();
-    document.getElementById('cancelled')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.getElementById('cancelled-invoices')?.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
+    cancelledToggle?.focus();
   }
 
-  async function downloadPdf(id: number) {
-    showSaveToast(await saveInvoicePdf(await reprintSnapshot(await getDb(), id)));
-  }
-  async function exportSummary(g: Group) {
+  async function saveTaxSummary(
+    range: ClosedDateRange | null,
+    rangeLabel: string,
+    fileName: string,
+  ): Promise<void> {
     const db = await getDb();
-    const breakdown = await yearClientBreakdown(db, g.year);
-    const s = await loadSettings();
-    showSaveToast(await saveSummaryPdf({
-      rangeLabel: `Calendar year ${g.year}`,
-      preparedOn: iso(new Date()),
-      businessName: s.inspectorName || 'My business', rollup: g.rollup, breakdown,
-    }, `Tax-Summary-${g.year}.pdf`));
-  }
-
-  async function exportRange() {
-    if (!rangeStart || !rangeEnd || rangeStart > rangeEnd) return;
-    const db = await getDb();
-    const range = { start: rangeStart, end: rangeEnd };
-    const [rollup, breakdown, s] = await Promise.all([
+    const [rollup, breakdown, settings] = await Promise.all([
       rangeRollup(db, range),
       rangeClientBreakdown(db, range),
       loadSettings(),
     ]);
+    if (rollup.count === 0) throw new Error('No finalized invoices exist in that date range.');
     showSaveToast(await saveSummaryPdf({
-      rangeLabel: `${rangeStart} to ${rangeEnd}`,
-      preparedOn: iso(new Date()),
-      businessName: s.inspectorName || 'My business', rollup, breakdown,
-    }, `Tax-Summary-${rangeStart}_to_${rangeEnd}.pdf`));
+      rangeLabel,
+      preparedOn: toIsoDate(new Date()),
+      businessName: settings.inspectorName || 'My business',
+      rollup,
+      breakdown,
+    }, fileName));
   }
-  async function duplicate(id: number) {
-    await duplicateInvoice(await getDb(), id, defaultInvoicePeriod());
-    await goto('/');
+
+  function exportRange(): Promise<void> {
+    return runAction('range-export', async () => {
+      const resolution = resolveHistoryRange(rangeStart, rangeEnd);
+      if (resolution.kind === 'invalid') return;
+      const range = resolution.range ? Object.freeze({ ...resolution.range }) : null;
+      const rangeLabel = historyRangeLabel(range);
+      const fileName = range
+        ? `Tax-Summary-${range.start}_to_${range.end}.pdf`
+        : 'Tax-Summary-All-Time.pdf';
+      await saveTaxSummary(range, rangeLabel, fileName);
+    });
+  }
+
+  function exportYear(year: number): Promise<void> {
+    return runAction(`year-export-${year}`, async () => {
+      const range = calendarYearRange(year);
+      await saveTaxSummary(
+        range,
+        historyRangeLabel(range, year),
+        `Tax-Summary-${year}.pdf`,
+      );
+    });
   }
 </script>
 
-<div class="head">
-  <h1>History</h1>
-  {#if voided.length}
-    <button class="cancelled-btn" onclick={showCancelled} title="View cancelled invoices so you can restore them">
-      ⟲ Cancelled invoices ({voided.length})
-    </button>
+<div class="history-head">
+  <div>
+    <h1>Invoice History</h1>
+    <p>Finalized invoices, kept separately from expense reports.</p>
+  </div>
+  {#if visibleCancelled.length > 0}
+    <button
+      class="history-cancelled-shortcut"
+      onclick={showCancelled}
+      aria-controls="cancelled-invoices"
+    >Cancelled invoices ({visibleCancelled.length})</button>
   {/if}
 </div>
 
-{#snippet invoiceRow(inv: InvoiceListItem)}
-  <li>
-    <button class="num" onclick={() => goto(`/invoice/${inv.id}`)} title="View invoice #{inv.invoiceNumber}">#{inv.invoiceNumber}</button>
-    <span class="date">{inv.issueDate}</span>
-    <span class="total tnum">{formatDollars(inv.totalCents)}</span>
-    <span class="acts">
-      <button class="primary" onclick={() => goto(`/invoice/${inv.id}`)}>View</button>
-      <button onclick={() => downloadPdf(inv.id)}>Download PDF</button>
-      <button onclick={() => duplicate(inv.id)}>Duplicate</button>
+{#if errorMessage}
+  <p class="history-error" role="alert">{errorMessage}</p>
+{/if}
+
+{#snippet invoiceRow(invoice: InvoiceListItem, allowRestore = false)}
+  <li class="history-row">
+    <button
+      class="history-number"
+      onclick={() => goto(`/invoice/${invoice.id}`)}
+      title="View invoice #{invoice.invoiceNumber}"
+    >#{invoice.invoiceNumber}</button>
+    <span class="history-date">{invoice.issueDate}</span>
+    <span class="history-amount tnum">{formatDollars(invoice.totalCents)}</span>
+    <span class="history-actions">
+      {#if allowRestore}
+        <button
+          class="primary"
+          disabled={!!busyAction}
+          onclick={() => restore(invoice)}
+        >{busyAction === `restore-${invoice.id}` ? 'Restoring…' : 'Restore'}</button>
+      {/if}
+      <button onclick={() => goto(`/invoice/${invoice.id}`)}>View</button>
+      {#if !allowRestore}
+        <button disabled={!!busyAction} onclick={() => downloadPdf(invoice)}>
+          {busyAction === `pdf-${invoice.id}` ? 'Saving…' : 'Download PDF'}
+        </button>
+        <button disabled={!!busyAction} onclick={() => duplicate(invoice)}>
+          {busyAction === `duplicate-${invoice.id}` ? 'Opening…' : 'Duplicate'}
+        </button>
+      {/if}
     </span>
   </li>
 {/snippet}
 
-{#if !loaded}
-  <p style="color:var(--text-secondary)">Loading…</p>
-{:else if groups.length === 0 && voided.length === 0}
-  <div class="empty">
+{#if loadState === 'loading'}
+  <p class="history-status" role="status">Loading invoice history…</p>
+{:else if loadState === 'error'}
+  <div class="history-empty">
+    <p class="history-error" role="alert">Could not load invoice history: {loadError}</p>
+    <button class="history-export" onclick={loadPage}>Retry</button>
+  </div>
+{:else if !hasSourceRecords}
+  <div class="history-empty">
     <p>No invoices yet.</p>
     <BigButton onclick={() => goto('/')}>Make your first invoice</BigButton>
   </div>
 {:else}
-  {#if thisYearRollup && thisYearRollup.count}
-    <div class="ytd">
-      <span class="ytd-year">{currentYear} so far</span>
-      <span class="ytd-fig"><b>{thisYearRollup.count}</b> {thisYearRollup.count === 1 ? 'invoice' : 'invoices'}</span>
-      <span class="ytd-fig tnum"><b>{formatDollars(thisYearRollup.totalBilledCents)}</b> billed</span>
-      <span class="ytd-fig tnum"><b>{formatDollars(thisYearRollup.totalTaxCents)}</b> HST</span>
-      <span class="ytd-fig tnum"><b>{formatDollars(thisYearRollup.totalBilledCents - thisYearRollup.totalTaxCents)}</b> income before tax</span>
+  {#if currentYearRollup.count > 0}
+    <div class="history-current-summary">
+      <strong>{currentYear} so far</strong>
+      <span><b>{currentYearRollup.count}</b> {currentYearRollup.count === 1 ? 'invoice' : 'invoices'}</span>
+      <span class="tnum"><b>{formatDollars(currentYearRollup.totalBilledCents)}</b> billed</span>
+      <span class="tnum"><b>{formatDollars(currentYearRollup.totalTaxCents)}</b> HST</span>
+      <span class="tnum"><b>{formatDollars(currentYearRollup.totalBilledCents - currentYearRollup.totalTaxCents)}</b> income before tax</span>
     </div>
   {/if}
 
-  {#if groups.length}
-    <div class="search">
-      <input type="search" bind:value={query} aria-label="Search invoices"
-        placeholder="Search — client, VIN, inspection #, invoice number, or date" />
-      {#if searching}<button class="export" onclick={() => (query = '')}>Clear</button>{/if}
-    </div>
-  {/if}
+  <div class="history-search" aria-busy={searchState === 'loading'}>
+    <input
+      type="search"
+      bind:value={query}
+      aria-label="Search finalized and cancelled invoices"
+      placeholder="Search finalized invoices — client, VIN, inspection #, number, or date"
+    />
+    {#if searching}<button onclick={() => (query = '')}>Clear</button>{/if}
+  </div>
+
+  <HistoryRangeControls
+    bind:start={rangeStart}
+    bind:end={rangeEnd}
+    exportLabel="Export tax summary"
+    busyLabel={busyAction === 'range-export' ? 'Exporting…' : ''}
+    onExport={exportRange}
+  />
 
   {#if searching}
-    {#if results.length}
-      <ul>
-        {#each results as inv (inv.id)}{@render invoiceRow(inv)}{/each}
-      </ul>
-    {:else}
-      <p class="muted">No invoices match “{query}”.</p>
+    {#if searchState === 'loading'}
+      <p class="history-status" role="status">Searching…</p>
+    {:else if searchState === 'ready'}
+      {#if searchParts.finalized.length > 0}
+        <ul class="history-list">
+          {#each searchParts.finalized as invoice (invoice.id)}
+            {@render invoiceRow(invoice)}
+          {/each}
+        </ul>
+      {:else}
+        <p class="history-status">No active invoices match “{query}”.</p>
+      {/if}
     {/if}
-  {:else}
-    {#if groups.length}
-    <div class="range">
-      <span class="range-lbl">Tax summary for a date range:</span>
-      <DatePicker bind:value={rangeStart} ariaLabel="From date" />
-      <span class="to">to</span>
-      <DatePicker bind:value={rangeEnd} ariaLabel="To date" />
-      <span class="presets">
-        <button onclick={presetThisYear}>This year</button>
-        <button onclick={presetLastYear}>Last year</button>
-        <button onclick={presetThisQuarter}>This quarter</button>
-      </span>
-      <button class="export-big" onclick={exportRange}>Export PDF</button>
-    </div>
-
-    {#each groups as g (g.year)}
-      <section class="year">
-      <div class="year-bar">
-        <button class="year-head" onclick={() => (g.open = !g.open)}>
-          <span class="yr">{g.open ? '▾' : '▸'} {g.year}</span>
-          <span class="chips">
-            <span class="chip">{g.rollup.count} {g.rollup.count === 1 ? 'invoice' : 'invoices'}</span>
-            <span class="chip tnum">{formatDollars(g.rollup.totalBilledCents)} billed</span>
-            <span class="chip tnum">{formatDollars(g.rollup.totalTaxCents)} HST</span>
-          </span>
-        </button>
-        <button class="export" onclick={() => exportSummary(g)}>Export tax summary</button>
-      </div>
-        {#if g.open}
-          <ul>
-            {#each g.invoices as inv (inv.id)}{@render invoiceRow(inv)}{/each}
+  {:else if grouped.length > 0}
+    {#each grouped as group (group.year)}
+      <section class="history-year">
+        <div class="history-year-bar">
+          <button
+            class="history-year-toggle"
+            onclick={() => toggleYear(group.year)}
+            aria-expanded={isYearOpen(group.year)}
+            aria-controls={`invoice-year-${group.year}`}
+          >
+            <span class="history-year-label">
+              <span aria-hidden="true">{isYearOpen(group.year) ? '▾' : '▸'}</span> {group.year}
+            </span>
+            <span class="history-chips">
+              <span class="history-chip">{group.rollup.count} {group.rollup.count === 1 ? 'invoice' : 'invoices'}</span>
+              <span class="history-chip tnum">{formatDollars(group.rollup.totalBilledCents)} billed</span>
+              <span class="history-chip tnum">{formatDollars(group.rollup.totalTaxCents)} HST</span>
+            </span>
+          </button>
+          <button
+            class="history-export"
+            disabled={!!busyAction}
+            onclick={() => exportYear(group.year)}
+          >{busyAction === `year-export-${group.year}` ? 'Exporting…' : `Export ${group.year} summary`}</button>
+        </div>
+        {#if isYearOpen(group.year)}
+          <ul class="history-list" id={`invoice-year-${group.year}`}>
+            {#each group.invoices as invoice (invoice.id)}
+              {@render invoiceRow(invoice)}
+            {/each}
           </ul>
         {/if}
       </section>
     {/each}
-    {/if}
+  {:else}
+    <p class="history-status">No active invoices fall within this date range.</p>
   {/if}
 
-  {#if voided.length}
-    <section class="year cancelled" id="cancelled">
-      <button class="year-head" onclick={() => (cancelledOpen = !cancelledOpen)}>
-        <span class="yr">{cancelledOpen ? '▾' : '▸'} Cancelled</span>
-        <span class="chips"><span class="chip">{voided.length} cancelled</span></span>
+  {#if visibleCancelled.length > 0}
+    <section class="history-year history-cancelled" id="cancelled-invoices">
+      <button
+        class="history-year-toggle"
+        bind:this={cancelledToggle}
+        onclick={() => (cancelledOpen = !cancelledOpen)}
+        aria-expanded={cancelledOpen}
+        aria-controls="cancelled-invoice-list"
+      >
+        <span class="history-year-label">
+          <span aria-hidden="true">{cancelledOpen ? '▾' : '▸'}</span> Cancelled invoices
+        </span>
+        <span class="history-chips">
+          <span class="history-chip">{visibleCancelled.length} cancelled</span>
+        </span>
       </button>
       {#if cancelledOpen}
-        <ul>
-          {#each voided as inv (inv.id)}
-            <li>
-              <button class="num" onclick={() => goto(`/invoice/${inv.id}`)} title="View invoice #{inv.invoiceNumber}">#{inv.invoiceNumber}</button>
-              <span class="date">{inv.issueDate}</span>
-              <span class="total tnum">{formatDollars(inv.totalCents)}</span>
-              <span class="acts">
-                <button class="primary" onclick={() => restore(inv.id)}>Restore</button>
-                <button onclick={() => goto(`/invoice/${inv.id}`)}>View</button>
-              </span>
-            </li>
+        <ul class="history-list" id="cancelled-invoice-list">
+          {#each visibleCancelled as invoice (invoice.id)}
+            {@render invoiceRow(invoice, true)}
           {/each}
         </ul>
       {/if}
     </section>
   {/if}
 {/if}
-
-<style>
-  .head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; margin: 0 0 var(--sp-6); }
-  h1 { font-size: var(--fs-xl); font-weight: 700; margin: 0; }
-  .cancelled-btn { min-height: var(--target); padding: 0 var(--sp-4); border: 1px solid var(--red-600); background: transparent;
-    color: var(--red-600); border-radius: var(--r-sm); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; white-space: nowrap; }
-  .cancelled-btn:hover { background: var(--red-600); color: #fff; }
-  .empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-4); color: var(--text-secondary); }
-  .year { margin-bottom: var(--sp-6); }
-  .cancelled { margin-top: var(--sp-8); }
-  .cancelled .yr { color: var(--text-muted); }
-  .year-bar { display: flex; align-items: stretch; gap: var(--sp-2); }
-  .year-head { display: flex; align-items: center; justify-content: space-between; flex: 1; gap: var(--sp-4);
-    background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); cursor: pointer; }
-  .export { padding: 0 var(--sp-4); border: 1px solid var(--border-strong); background: var(--bg-surface);
-    color: var(--accent-strong); border-radius: var(--r-md); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; white-space: nowrap; }
-  .export:hover { background: var(--accent-tint); }
-  .ytd { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4);
-    background: var(--accent-tint); border: 1px solid var(--border); border-radius: var(--r-md);
-    padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-6); }
-  .ytd-year { font-weight: 700; color: var(--accent-strong); margin-right: var(--sp-2); }
-  .ytd-fig { color: var(--text-secondary); }
-  .ytd-fig b { color: var(--text-primary); }
-  .export-big { margin-left: auto; min-height: var(--target); padding: 0 var(--sp-6);
-    border: 1px solid var(--accent-fill); background: var(--accent-fill); color: var(--on-accent, #fff);
-    border-radius: var(--r-sm); font-size: var(--fs-base); font-weight: 700; cursor: pointer; white-space: nowrap; }
-  .export-big:hover { background: var(--accent-fill-hover); }
-  .presets { display: inline-flex; gap: var(--sp-2); flex-wrap: wrap; }
-  .presets button { min-height: var(--target); padding: 0 var(--sp-3); border: 1px solid var(--border);
-    background: var(--bg-surface); color: var(--text-secondary); border-radius: var(--r-sm);
-    font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
-  .presets button:hover { background: var(--accent-tint); color: var(--accent-strong); }
-  .search { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-6); }
-  .search input { flex: 1; min-height: var(--target); padding: 0 var(--sp-4); font-size: var(--fs-base);
-    border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--text-primary); }
-  .muted { color: var(--text-secondary); }
-  .range { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-6);
-    background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); }
-  .range-lbl { font-weight: 600; color: var(--text-secondary); margin-right: var(--sp-2); }
-  .range .to { color: var(--text-muted); }
-  .yr { font-size: var(--fs-lg); font-weight: 700; }
-  .chips { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
-  .chip { background: var(--bg-sunken); color: var(--text-secondary); border-radius: var(--r-full); padding: 2px var(--sp-3); font-size: var(--fs-sm); }
-  ul { list-style: none; margin: var(--sp-2) 0 0; padding: 0; }
-  li { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: var(--sp-4);
-    min-height: 56px; padding: 0 var(--sp-4); border-bottom: 1px solid var(--border); }
-  .num { font-weight: 600; }
-  button.num { border: none; background: none; padding: 0; font: inherit; font-weight: 600; color: var(--accent-strong); text-align: left; cursor: pointer; }
-  button.num:hover { text-decoration: underline; }
-  button.num:focus-visible { outline: 2px solid var(--accent-fill); outline-offset: 2px; border-radius: var(--r-sm); }
-  .date { color: var(--text-secondary); }
-  .total { font-weight: 700; }
-  .acts { display: flex; gap: var(--sp-2); }
-  .acts button { min-height: 44px; padding: 0 var(--sp-3); border: 1px solid var(--border-strong); background: var(--bg-surface);
-    border-radius: var(--r-sm); color: var(--accent-strong); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
-  .acts button:hover { background: var(--accent-tint); }
-  .acts button.primary { background: var(--accent-fill); color: #fff; border-color: var(--accent-fill); }
-  .acts button.primary:hover { background: var(--accent-fill-hover); }
-</style>
