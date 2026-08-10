@@ -2,7 +2,7 @@ import { test, expect, describe } from 'vitest';
 import { createSqlJsDb } from './sqljs-adapter';
 import { runMigrations } from './migrate';
 import { addEntry, deleteEntryIfUnused, listEntries, renameEntry, setActive } from './catalog-repo';
-import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, finalizeInvoice, reprintSnapshot, listYears, listFinalizedInvoices, listInvoicesForYear, yearRollup, latestDraftId, listDrafts, deleteDraft, duplicateInvoice, yearClientBreakdown, rangeRollup, rangeClientBreakdown, peekNextSeq, voidInvoice, listVoided, unvoidInvoice, searchInvoices, loadBilledHistory, getInvoiceStatus, deleteVoidedInvoice } from './invoice-repo';
+import { createDraft, getOrCreateLatestDraft, loadDraft, saveDraft, saveDraftInDateOrder, finalizeInvoice, reprintSnapshot, listYears, listFinalizedInvoices, listInvoicesForYear, yearRollup, latestDraftId, listDrafts, deleteDraft, duplicateInvoice, yearClientBreakdown, rangeRollup, rangeClientBreakdown, peekNextSeq, voidInvoice, listVoided, unvoidInvoice, searchInvoices, loadBilledHistory, getInvoiceStatus, deleteVoidedInvoice } from './invoice-repo';
 import { allocateSeq } from './numbering-repo';
 import { getSettings, saveSettings } from './settings-repo';
 import type { LineItem } from '../types';
@@ -107,6 +107,45 @@ describe('invoice draft repo', () => {
       periodStart: '2026-05-22',
       periodEnd: '2026-05-28',
       lines: [expect.objectContaining({ inspectionNumber: 'DATA-SURVIVES' })],
+    }));
+  });
+
+  test('an omitted sequence clears an old-year number when the invoice moves into a conflicting year', async () => {
+    const db = await freshDb();
+    const occupied = await createDraft(db, {
+      year: 2027, issueDate: '2027-01-07',
+      periodStart: '2027-01-01', periodEnd: '2027-01-06',
+    });
+    await saveDraft(db, occupied, {
+      seq: 11,
+      year: 2027, issueDate: '2027-01-07',
+      periodStart: '2027-01-01', periodEnd: '2027-01-06',
+      lines: [line({ inspectionNumber: 'OCCUPIED', date: '2027-01-06' })],
+    });
+    await finalizeInvoice(db, occupied);
+
+    const moving = await createDraft(db, {
+      year: 2026, issueDate: '2026-12-31',
+      periodStart: '2026-12-25', periodEnd: '2026-12-30',
+    });
+    await saveDraft(db, moving, {
+      seq: 11,
+      year: 2026, issueDate: '2026-12-31',
+      periodStart: '2026-12-25', periodEnd: '2026-12-30',
+      lines: [line({ inspectionNumber: 'BEFORE-MOVE' })],
+    });
+
+    await saveDraft(db, moving, {
+      year: 2027, issueDate: '2027-01-08',
+      periodStart: '2027-01-01', periodEnd: '2027-01-07',
+      lines: [line({ inspectionNumber: 'SURVIVES-MOVE', date: '2027-01-07' })],
+    });
+
+    expect(await loadDraft(db, moving)).toEqual(expect.objectContaining({
+      seq: null,
+      year: 2027,
+      issueDate: '2027-01-08',
+      lines: [expect.objectContaining({ inspectionNumber: 'SURVIVES-MOVE' })],
     }));
   });
 
@@ -870,6 +909,38 @@ describe('by-year views', () => {
 });
 
 describe('latestDraftId', () => {
+  test('concurrent launch initialization creates only one blank draft', async () => {
+    const db = await freshDb();
+    const header = {
+      year: 2026, issueDate: '2026-05-28',
+      periodStart: '2026-05-21', periodEnd: '2026-05-27',
+    };
+
+    const ids = await Promise.all([
+      getOrCreateLatestDraft(db, header),
+      getOrCreateLatestDraft(db, header),
+    ]);
+
+    expect(ids[0]).toBe(ids[1]);
+    expect(await listDrafts(db)).toHaveLength(1);
+  });
+
+  test('launch initialization reopens an existing draft without adding another', async () => {
+    const db = await freshDb();
+    const existing = await createDraft(db, {
+      year: 2026, issueDate: '2026-05-28',
+      periodStart: '2026-05-21', periodEnd: '2026-05-27',
+    });
+
+    const opened = await getOrCreateLatestDraft(db, {
+      year: 2027, issueDate: '2027-01-07',
+      periodStart: '2027-01-01', periodEnd: '2027-01-07',
+    });
+
+    expect(opened).toBe(existing);
+    expect(await listDrafts(db)).toHaveLength(1);
+  });
+
   test('returns null when there are no drafts, then the newest draft id', async () => {
     const db = await freshDb();
     expect(await latestDraftId(db)).toBeNull();

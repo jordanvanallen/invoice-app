@@ -25,6 +25,22 @@ export async function createDraft(db: Db, header: DraftHeader): Promise<number> 
   return r.lastInsertId as number;
 }
 
+/**
+ * Reopen the newest draft, creating one only when none exists. The conditional
+ * INSERT keeps concurrent page initializers from each creating a blank draft.
+ */
+export async function getOrCreateLatestDraft(db: Db, header: DraftHeader): Promise<number> {
+  await db.execute(
+    `INSERT INTO invoices (year, status, issue_date, period_start, period_end)
+     SELECT ?, 'draft', ?, ?, ?
+      WHERE NOT EXISTS (SELECT 1 FROM invoices WHERE status = 'draft')`,
+    [header.year, header.issueDate, header.periodStart, header.periodEnd],
+  );
+  const id = await latestDraftId(db);
+  if (id === null) throw new Error('Could not open or create an invoice draft.');
+  return id;
+}
+
 interface LineRow {
   type: 'completed' | 'noshow';
   position: number;
@@ -133,14 +149,17 @@ export async function saveDraft(
     validateSeqResult(draft.seq, await takenSeqs(db, year, invoiceId));
   }
   const updateSequence = draft.seq !== undefined;
+  const sequenceAssignment = updateSequence
+    ? 'seq = ?, '
+    : 'seq = CASE WHEN year = ? THEN seq ELSE NULL END, ';
   await executeStatementsAtomically(db, [
     {
       sql: `UPDATE invoices SET
-              ${updateSequence ? 'seq = ?, ' : ''}year = ?, issue_date = ?, period_start = ?, period_end = ?,
+              ${sequenceAssignment}year = ?, issue_date = ?, period_start = ?, period_end = ?,
               draft_revision = draft_revision + 1
             WHERE id = ? AND status = 'draft'`,
       params: [
-        ...(updateSequence ? [draft.seq ?? null] : []),
+        updateSequence ? (draft.seq ?? null) : year,
         year, draft.issueDate, draft.periodStart, draft.periodEnd, invoiceId,
       ],
       expectedRowsAffected: 1,

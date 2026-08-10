@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { onNavigate } from '$app/navigation';
   import InvoiceSection from '$lib/components/InvoiceSection.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
@@ -11,7 +11,7 @@
   import { loadSettings } from '$lib/stores/settings';
   import { loadClients, loadLocations, loadApprovers, addClient as addClientDb, addLocation as addLocationDb, addApprover as addApproverDb } from '$lib/stores/catalog';
   import { getDb } from '$lib/db';
-  import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, latestDraftId, listDrafts, deleteDraft, finalizeInvoice, peekNextSeq, loadBilledHistory, type BilledHistory, type DraftListItem, type SaveableDraft } from '$lib/db/invoice-repo';
+  import { createDraft, getOrCreateLatestDraft, loadDraft, saveDraft, saveDraftInDateOrder, listDrafts, deleteDraft, finalizeInvoice, peekNextSeq, loadBilledHistory, type BilledHistory, type DraftListItem, type SaveableDraft } from '$lib/db/invoice-repo';
   import { takenSeqs } from '$lib/db/numbering-repo';
   import { formatInvoiceNumber } from '$lib/numbering';
   import { computeTotals } from '$lib/totals';
@@ -158,47 +158,63 @@
     });
   }
 
-  onMount(async () => {
-    settings = await loadSettings();
-    clients = await loadClients();
-    locations = await loadLocations();
-    approvers = await loadApprovers();
+  onMount(() => {
+    let cancelled = false;
 
-    const def = defaultInvoicePeriod();
-    todayIso = def.issueDate;
+    async function initialize() {
+      const [nextSettings, nextClients, nextLocations, nextApprovers] = await Promise.all([
+        loadSettings(), loadClients(), loadLocations(), loadApprovers(),
+      ]);
+      if (cancelled) return;
+      settings = nextSettings;
+      clients = nextClients;
+      locations = nextLocations;
+      approvers = nextApprovers;
 
-    const db = await getDb();
-    billed = await loadBilledHistory(db);
-    let id = await latestDraftId(db);
-    if (id === null) {
-      id = await createDraft(db, def);
-    }
-    const draft = await loadDraft(db, id);
-    applyLoadedDraft(id, draft, def);
-    savedDrafts = await listDrafts(db);
-    loaded = true;
+      const def = defaultInvoicePeriod();
+      todayIso = def.issueDate;
 
-    // Flush on window close (best-effort, silent — no "unsaved changes" prompt).
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      const w = getCurrentWindow();
-      unlisten = await w.onCloseRequested(async (event) => {
-        await handleAutosavingWindowCloseRequest(event, {
-          autosave,
-          canFlush: invoiceId !== null && !finalized,
-          destroy: () => w.destroy(),
-          exit: async (code) => {
-            const { exit } = await import('@tauri-apps/plugin-process');
-            await exit(code);
-          },
+      const db = await getDb();
+      if (cancelled) return;
+      const nextBilled = await loadBilledHistory(db);
+      const id = await getOrCreateLatestDraft(db, def);
+      const draft = await loadDraft(db, id);
+      const nextSavedDrafts = await listDrafts(db);
+      if (cancelled) return;
+      billed = nextBilled;
+      applyLoadedDraft(id, draft, def);
+      savedDrafts = nextSavedDrafts;
+      loaded = true;
+
+      // Flush on window close (best-effort, silent — no "unsaved changes" prompt).
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        if (cancelled) return;
+        const w = getCurrentWindow();
+        const stopListening = await w.onCloseRequested(async (event) => {
+          await handleAutosavingWindowCloseRequest(event, {
+            autosave,
+            canFlush: invoiceId !== null && !finalized,
+            destroy: () => w.destroy(),
+            exit: async (code) => {
+              const { exit } = await import('@tauri-apps/plugin-process');
+              await exit(code);
+            },
+          });
         });
-      });
-    } catch { /* not in Tauri */ }
-  });
+        if (cancelled) stopListening();
+        else unlisten = stopListening;
+      } catch { /* not in Tauri */ }
+    }
 
-  onDestroy(() => {
-    unlisten?.();
-    autosave?.dispose();
+    void initialize();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+      unlisten = null;
+      autosave?.dispose();
+      autosave = null;
+    };
   });
 
   onNavigate(() => flushPendingAutosave(
@@ -398,21 +414,21 @@
       await flushPendingAutosave(autosave, loaded && invoiceId !== null && !finalized);
       const db = await getDb();
       const deletingCurrent = target.id === invoiceId;
-      if (deletingCurrent) autosave?.dispose();
-      await deleteDraft(db, target.id);
-      let remaining = await listDrafts(db);
+      let replacement: { id: number; draft: DraftInvoice } | null = null;
       if (deletingCurrent) {
-        let nextId = remaining[0]?.id ?? null;
-        if (nextId === null) {
-          nextId = await createDraft(db, defaultInvoicePeriod());
-          remaining = await listDrafts(db);
-        }
-        const draft = await loadDraft(db, nextId);
+        const currentDrafts = await listDrafts(db);
+        let nextId = currentDrafts.find((draft) => draft.id !== target.id)?.id ?? null;
+        if (nextId === null) nextId = await createDraft(db, defaultInvoicePeriod());
+        replacement = { id: nextId, draft: await loadDraft(db, nextId) };
+      }
+      await deleteDraft(db, target.id);
+      if (replacement) {
+        autosave?.dispose();
         loaded = false;
-        applyLoadedDraft(nextId, draft, defaultInvoicePeriod());
+        applyLoadedDraft(replacement.id, replacement.draft, defaultInvoicePeriod());
         loaded = true;
       }
-      savedDrafts = remaining;
+      savedDrafts = await listDrafts(db);
       draftToDiscard = null;
     } catch (error) {
       draftRecoveryError = (error as Error).message;

@@ -27,5 +27,23 @@ describe('invoice draft recovery route contract', () => {
     expect(page).toContain('void switchToDraft(');
     expect(page).toContain('title="Discard this saved draft?"');
     expect(page).toContain('await deleteDraft(db, target.id);');
+    const discard = page.slice(
+      page.indexOf('async function discardSelectedDraft()'),
+      page.indexOf('async function addClientRefresh('),
+    );
+    expect(discard.indexOf('await deleteDraft(db, target.id);'))
+      .toBeLessThan(discard.indexOf('autosave?.dispose();'));
+  });
+
+  test('cancels an abandoned async page initializer and its autosave controller', () => {
+    const page = source();
+
+    expect(page).toContain('onMount(() => {');
+    expect(page).toContain('let cancelled = false;');
+    expect(page).toContain('if (cancelled) return;');
+    expect(page).toContain('cancelled = true;');
+    expect(page).toContain('autosave?.dispose();');
+    expect(page).toContain('autosave = null;');
+    expect(page).not.toContain('onMount(async () => {');
   });
 });
