@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   canPersistInvoiceSequence,
   draftSeqForPersistence,
+  draftSeqUpdateForPersistence,
   resolveInvoiceSequenceState,
   shouldFillDefaultInvoiceSequence,
 } from './invoiceSequence';
@@ -141,6 +142,30 @@ describe('draftSeqForPersistence', () => {
 
     expect(draftSeqForPersistence(state)).toBeNull();
     expect(canPersistInvoiceSequence(state)).toBe(false);
+  });
+});
+
+describe('draftSeqUpdateForPersistence', () => {
+  test('preserves the stored sequence while edited text is invalid', () => {
+    const state = resolveInvoiceSequenceState({
+      invoiceSeqText: '11.5',
+      invoiceYear: 2026,
+      takenSequences: [],
+      takenSequencesYear: 2026,
+    });
+
+    expect(draftSeqUpdateForPersistence(state)).toBeUndefined();
+  });
+
+  test('persists a parsed sequence while duplicate validation is loading', () => {
+    const state = resolveInvoiceSequenceState({
+      invoiceSeqText: '12',
+      invoiceYear: 2026,
+      takenSequences: [],
+      takenSequencesYear: null,
+    });
+
+    expect(draftSeqUpdateForPersistence(state)).toBe(12);
   });
 });
 

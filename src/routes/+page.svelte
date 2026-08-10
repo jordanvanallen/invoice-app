@@ -11,7 +11,7 @@
   import { loadSettings } from '$lib/stores/settings';
   import { loadClients, loadLocations, loadApprovers, addClient as addClientDb, addLocation as addLocationDb, addApprover as addApproverDb } from '$lib/stores/catalog';
   import { getDb } from '$lib/db';
-  import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, latestDraftId, finalizeInvoice, peekNextSeq, loadBilledHistory, type BilledHistory } from '$lib/db/invoice-repo';
+  import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, latestDraftId, listDrafts, deleteDraft, finalizeInvoice, peekNextSeq, loadBilledHistory, type BilledHistory, type DraftListItem, type SaveableDraft } from '$lib/db/invoice-repo';
   import { takenSeqs } from '$lib/db/numbering-repo';
   import { formatInvoiceNumber } from '$lib/numbering';
   import { computeTotals } from '$lib/totals';
@@ -27,8 +27,8 @@
   import { bpToPercentInput } from '$lib/ui/format';
   import { addAndRefreshComboboxEntry, type ComboboxAddNewResult } from '$lib/ui/combobox';
   import {
-    canPersistInvoiceSequence,
     draftSeqForPersistence,
+    draftSeqUpdateForPersistence,
     resolveInvoiceSequenceState,
     shouldFillDefaultInvoiceSequence,
   } from '$lib/ui/invoiceSequence';
@@ -52,6 +52,10 @@
   let billed = $state<BilledHistory>({ vins: {}, inspections: {} });
 
   let invoiceId = $state<number | null>(null);
+  let savedDrafts = $state<DraftListItem[]>([]);
+  let switchingDraft = $state(false);
+  let draftRecoveryError = $state('');
+  let draftToDiscard = $state<DraftListItem | null>(null);
   let saveState = $state<'idle' | 'saving' | 'saved' | 'error'>('idle');
   let savedAt = $state('');
 
@@ -91,6 +95,44 @@
     };
   }
 
+  function buildDraftForPersistence(): SaveableDraft {
+    const draft = buildDraft();
+    const seq = draftSeqUpdateForPersistence(seqState);
+    if (seq === undefined) {
+      const { seq: _invalidSequence, ...withoutSequence } = draft;
+      return withoutSequence;
+    }
+    return { ...draft, seq };
+  }
+
+  function draftLabel(draft: DraftListItem): string {
+    const number = draft.seq === null ? 'Unnumbered' : `#${draft.seq}-${draft.year}`;
+    const lines = `${draft.lineCount} ${draft.lineCount === 1 ? 'row' : 'rows'}`;
+    return `${number} · ${draft.issueDate || 'No invoice date'} · ${lines}`;
+  }
+
+  async function refreshDrafts() {
+    savedDrafts = await listDrafts(await getDb());
+  }
+
+  function applyLoadedDraft(id: number, draft: DraftInvoice, def: ReturnType<typeof defaultInvoicePeriod>) {
+    autosave?.dispose();
+    invoiceId = id;
+    issueDate = draft.issueDate || def.issueDate;
+    periodStart = draft.periodStart || def.periodStart;
+    periodEnd = draft.periodEnd || def.periodEnd;
+    invoiceSeqText = draft.seq === null ? '' : String(draft.seq);
+    takenSequences = [];
+    takenSequencesYear = null;
+    completed = draft.lines.filter((line) => line.type === 'completed').map(toEditorRow);
+    noshow = draft.lines.filter((line) => line.type === 'noshow').map(toEditorRow);
+    finalized = null;
+    finalizeSaving = false;
+    saveState = 'idle';
+    lastSavedJson = JSON.stringify(buildDraftForPersistence());
+    makeAutosave();
+  }
+
   function sortInvoiceRows() {
     const sorted = sortInvoiceSections(completed, noshow);
     completed = sorted.completed;
@@ -100,7 +142,7 @@
   function makeAutosave() {
     autosave?.dispose();
     autosave = createAutosaveController({
-      read: buildDraft,
+      read: buildDraftForPersistence,
       serialize: JSON.stringify,
       isSaved: (json) => json === lastSavedJson,
       markSaved: (json) => { lastSavedJson = json; },
@@ -111,6 +153,7 @@
       setState: (state) => { saveState = state; },
       onSaved: () => {
         savedAt = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        void refreshDrafts();
       },
     });
   }
@@ -130,16 +173,9 @@
     if (id === null) {
       id = await createDraft(db, def);
     }
-    invoiceId = id;
     const draft = await loadDraft(db, id);
-    issueDate = draft.issueDate || def.issueDate;
-    periodStart = draft.periodStart || def.periodStart;
-    periodEnd = draft.periodEnd || def.periodEnd;
-    invoiceSeqText = draft.seq === null ? '' : String(draft.seq);
-    completed = draft.lines.filter((l) => l.type === 'completed').map(toEditorRow);
-    noshow = draft.lines.filter((l) => l.type === 'noshow').map(toEditorRow);
-    lastSavedJson = JSON.stringify(buildDraft());
-    makeAutosave();
+    applyLoadedDraft(id, draft, def);
+    savedDrafts = await listDrafts(db);
     loaded = true;
 
     // Flush on window close (best-effort, silent — no "unsaved changes" prompt).
@@ -149,7 +185,7 @@
       unlisten = await w.onCloseRequested(async (event) => {
         await handleAutosavingWindowCloseRequest(event, {
           autosave,
-          canFlush: invoiceId !== null && canPersistInvoiceSequence(seqState),
+          canFlush: invoiceId !== null && !finalized,
           destroy: () => w.destroy(),
           exit: async (code) => {
             const { exit } = await import('@tauri-apps/plugin-process');
@@ -167,18 +203,14 @@
 
   onNavigate(() => flushPendingAutosave(
     autosave,
-    loaded && invoiceId !== null && !finalized && canPersistInvoiceSequence(seqState),
+    loaded && invoiceId !== null && !finalized,
   ));
 
   // Debounced autosave: persists 1.5s after a real change. Skips save-on-load and
   // no-op re-saves by comparing against the last persisted snapshot.
   $effect(() => {
     if (!loaded || invoiceId === null || finalized) return;
-    if (!canPersistInvoiceSequence(seqState)) {
-      autosave?.cancelPending();
-      return;
-    }
-    const draft = buildDraft();
+    const draft = buildDraftForPersistence();
     const json = JSON.stringify(draft);
     if (json === lastSavedJson) return;
     autosave?.notifyChanged();
@@ -327,22 +359,66 @@
     const db = await getDb();
     const def = defaultInvoicePeriod();
     const id = await createDraft(db, def);
-    invoiceId = id;
+    const draft = await loadDraft(db, id);
     billed = await loadBilledHistory(db);
     todayIso = def.issueDate;
-    issueDate = def.issueDate;
-    periodStart = def.periodStart;
-    periodEnd = def.periodEnd;
-    invoiceSeqText = '';
-    takenSequences = [];
-    takenSequencesYear = null;
-    completed = [];
-    noshow = [];
-    finalized = null;
-    finalizeSaving = false;
-    saveState = 'idle';
-    lastSavedJson = JSON.stringify(buildDraft());
-    makeAutosave();
+    loaded = false;
+    applyLoadedDraft(id, draft, def);
+    savedDrafts = await listDrafts(db);
+    loaded = true;
+  }
+
+  async function switchToDraft(nextId: number) {
+    if (nextId === invoiceId || switchingDraft) return;
+    switchingDraft = true;
+    draftRecoveryError = '';
+    try {
+      await flushPendingAutosave(autosave, loaded && invoiceId !== null && !finalized);
+      const db = await getDb();
+      const draft = await loadDraft(db, nextId);
+      const def = defaultInvoicePeriod();
+      loaded = false;
+      applyLoadedDraft(nextId, draft, def);
+      savedDrafts = await listDrafts(db);
+      loaded = true;
+    } catch (error) {
+      draftRecoveryError = (error as Error).message;
+      loaded = true;
+    } finally {
+      switchingDraft = false;
+    }
+  }
+
+  async function discardSelectedDraft() {
+    const target = draftToDiscard;
+    if (!target || switchingDraft) return;
+    switchingDraft = true;
+    draftRecoveryError = '';
+    try {
+      await flushPendingAutosave(autosave, loaded && invoiceId !== null && !finalized);
+      const db = await getDb();
+      const deletingCurrent = target.id === invoiceId;
+      if (deletingCurrent) autosave?.dispose();
+      await deleteDraft(db, target.id);
+      let remaining = await listDrafts(db);
+      if (deletingCurrent) {
+        let nextId = remaining[0]?.id ?? null;
+        if (nextId === null) {
+          nextId = await createDraft(db, defaultInvoicePeriod());
+          remaining = await listDrafts(db);
+        }
+        const draft = await loadDraft(db, nextId);
+        loaded = false;
+        applyLoadedDraft(nextId, draft, defaultInvoicePeriod());
+        loaded = true;
+      }
+      savedDrafts = remaining;
+      draftToDiscard = null;
+    } catch (error) {
+      draftRecoveryError = (error as Error).message;
+    } finally {
+      switchingDraft = false;
+    }
   }
 
   async function addClientRefresh(name: string): Promise<number> {
@@ -382,6 +458,35 @@
     </div>
   </div>
 {:else}
+  {#if savedDrafts.length > 1}
+    <section class="draft-recovery" aria-label="Saved invoice drafts">
+      <div>
+        <strong>{savedDrafts.length} saved invoice drafts found.</strong>
+        <span>Your work is still stored. Choose which draft to continue.</span>
+      </div>
+      <label>
+        <span>Editing</span>
+        <select
+          aria-label="Saved invoice draft"
+          value={invoiceId ?? ''}
+          disabled={switchingDraft}
+          onchange={(event) => void switchToDraft(Number((event.currentTarget as HTMLSelectElement).value))}
+        >
+          {#each savedDrafts as draft (draft.id)}
+            <option value={draft.id}>{draftLabel(draft)}</option>
+          {/each}
+        </select>
+      </label>
+      <button
+        type="button"
+        class="discard-draft"
+        disabled={switchingDraft}
+        onclick={() => (draftToDiscard = savedDrafts.find((draft) => draft.id === invoiceId) ?? null)}
+      >Discard this draft…</button>
+    </section>
+  {/if}
+  {#if draftRecoveryError}<p class="err draft-recovery-error">Couldn't manage saved drafts: {draftRecoveryError}</p>{/if}
+
   <div class="head">
     <h1>New Invoice</h1>
     <StatusPill status="draft" />
@@ -512,9 +617,35 @@
       {#if finalizeError}<p class="err">Couldn't save: {finalizeError}</p>{/if}
     </ConfirmDialog>
   {/if}
+
+  {#if draftToDiscard}
+    <ConfirmDialog
+      title="Discard this saved draft?"
+      confirmLabel="Discard draft"
+      confirmVariant="destructive"
+      confirmDisabled={switchingDraft}
+      onConfirm={discardSelectedDraft}
+      onCancel={() => (draftToDiscard = null)}
+    >
+      <p><b>{draftLabel(draftToDiscard)}</b> will be permanently deleted.</p>
+      <p style="color:var(--text-secondary)">Finalized and cancelled invoices are not affected.</p>
+    </ConfirmDialog>
+  {/if}
 {/if}
 
 <style>
+  .draft-recovery { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap;
+    margin-bottom: var(--sp-4); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--amber-600);
+    border-radius: var(--r-md); background: var(--amber-50); color: var(--text-secondary); }
+  .draft-recovery > div { display: flex; flex-direction: column; gap: 2px; flex: 1 1 280px; }
+  .draft-recovery strong { color: var(--text-primary); }
+  .draft-recovery label { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); font-weight: 600; }
+  .draft-recovery select { min-height: var(--input-h); max-width: 360px; padding: 0 var(--sp-3); border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm); background: var(--bg-surface); color: var(--text-primary); }
+  .discard-draft { min-height: var(--target); padding: 0 var(--sp-3); border: 1px solid var(--red-600);
+    border-radius: var(--r-sm); background: var(--bg-surface); color: var(--red-600); font-weight: 600; cursor: pointer; }
+  .discard-draft:disabled { cursor: default; opacity: .6; }
+  .draft-recovery-error { margin-bottom: var(--sp-4); }
   .head { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); }
   .head .spacer { flex: 1; }
   .invoice-number { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 600; }

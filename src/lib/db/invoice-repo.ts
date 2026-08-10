@@ -116,7 +116,7 @@ export async function loadDraft(db: Db, invoiceId: number): Promise<DraftInvoice
   return (await loadDraftWithRevision(db, invoiceId)).draft;
 }
 
-type SaveableDraft = Omit<DraftInvoice, 'seq'> & { seq?: number | null };
+export type SaveableDraft = Omit<DraftInvoice, 'seq'> & { seq?: number | null };
 
 function deriveInvoiceYear(issueDate: string, fallbackYear: number): number {
   const yearText = issueDate.slice(0, 4);
@@ -132,14 +132,16 @@ export async function saveDraft(
   if (draft.seq !== undefined && draft.seq !== null) {
     validateSeqResult(draft.seq, await takenSeqs(db, year, invoiceId));
   }
+  const updateSequence = draft.seq !== undefined;
   await executeStatementsAtomically(db, [
     {
       sql: `UPDATE invoices SET
-              seq = ?, year = ?, issue_date = ?, period_start = ?, period_end = ?,
+              ${updateSequence ? 'seq = ?, ' : ''}year = ?, issue_date = ?, period_start = ?, period_end = ?,
               draft_revision = draft_revision + 1
             WHERE id = ? AND status = 'draft'`,
       params: [
-        draft.seq ?? null, year, draft.issueDate, draft.periodStart, draft.periodEnd, invoiceId,
+        ...(updateSequence ? [draft.seq ?? null] : []),
+        year, draft.issueDate, draft.periodStart, draft.periodEnd, invoiceId,
       ],
       expectedRowsAffected: 1,
     },
@@ -449,6 +451,57 @@ export async function latestDraftId(db: Db): Promise<number | null> {
     "SELECT id FROM invoices WHERE status = 'draft' ORDER BY id DESC LIMIT 1",
   );
   return rows[0]?.id ?? null;
+}
+
+export interface DraftListItem {
+  id: number;
+  year: number;
+  seq: number | null;
+  issueDate: string;
+  lineCount: number;
+  draftRevision: number;
+}
+
+interface DraftListRow {
+  id: number;
+  year: number;
+  seq: number | null;
+  issue_date: string;
+  line_count: number;
+  draft_revision: number;
+}
+
+/** Every saved invoice draft. Multiple rows can exist after duplication or an interrupted workflow. */
+export async function listDrafts(db: Db): Promise<DraftListItem[]> {
+  const rows = await db.select<DraftListRow>(
+    `SELECT i.id, i.year, i.seq, i.issue_date, i.draft_revision,
+            COUNT(li.id) AS line_count
+       FROM invoices i
+       LEFT JOIN line_items li ON li.invoice_id = i.id
+      WHERE i.status = 'draft'
+      GROUP BY i.id, i.year, i.seq, i.issue_date, i.draft_revision
+      ORDER BY i.id DESC`,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    year: row.year,
+    seq: row.seq,
+    issueDate: row.issue_date,
+    lineCount: Number(row.line_count),
+    draftRevision: Number(row.draft_revision),
+  }));
+}
+
+/** Permanently discard a draft and its lines. Finalized and cancelled invoices are never touched. */
+export async function deleteDraft(db: Db, id: number): Promise<void> {
+  await executeStatementsAtomically(db, [
+    { sql: 'DELETE FROM line_items WHERE invoice_id = ?', params: [id] },
+    {
+      sql: "DELETE FROM invoices WHERE id = ? AND status = 'draft'",
+      params: [id],
+      expectedRowsAffected: 1,
+    },
+  ]);
 }
 
 /** Copy an invoice's line items into a brand-new draft (new dates). Returns the draft id. */

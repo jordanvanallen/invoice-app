@@ -20,6 +20,18 @@ export function canPersistInvoiceSequence(state: InvoiceSequenceState): boolean 
   return draftSeqForPersistence(state) !== null;
 }
 
+/**
+ * Sequence update for an ordinary draft save. Invalid or empty text must not
+ * erase the last valid sequence, but the rest of the draft can still persist.
+ */
+export function draftSeqUpdateForPersistence(
+  state: InvoiceSequenceState,
+): number | null | undefined {
+  if (state.status === 'ready') return state.draftSeq;
+  if (state.status === 'checking' && state.parsedSeq !== null) return state.parsedSeq;
+  return undefined;
+}
+
 export function shouldFillDefaultInvoiceSequence(invoiceSeqText: string): boolean {
   return !invoiceSeqText.trim();
 }
