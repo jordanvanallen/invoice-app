@@ -661,7 +661,7 @@ describe('finalize + reprint', () => {
     }]);
   });
 
-  test('finalize stores a date-ordered snapshot that reprints identically', async () => {
+  test('finalize stores a date/inspection-number ordered snapshot that reprints identically', async () => {
     const db = await freshDb();
     const id = await createDraft(db, {
       year: 2026,
@@ -676,10 +676,11 @@ describe('finalize + reprint', () => {
       periodStart: '2026-07-01',
       periodEnd: '2026-07-14',
       lines: [
-        line({ inspectionNumber: 'completed-new', date: '2026-07-14', position: 0 }),
+        line({ inspectionNumber: 'completed-10', date: '2026-07-14', position: 0 }),
         line({ type: 'noshow', inspectionNumber: 'noshow-new', date: '2026-07-13', position: 1 }),
         line({ inspectionNumber: 'completed-old', date: '2026-07-01', position: 2 }),
         line({ type: 'noshow', inspectionNumber: 'noshow-old', date: '2026-07-02', position: 3 }),
+        line({ inspectionNumber: 'completed-2', date: '2026-07-14', position: 4 }),
       ],
     });
 
@@ -687,7 +688,7 @@ describe('finalize + reprint', () => {
     const reprinted = await reprintSnapshot(db, id);
 
     expect(finalized.lines.map((row) => row.inspectionNumber)).toEqual([
-      'completed-old', 'completed-new', 'noshow-old', 'noshow-new',
+      'completed-old', 'completed-2', 'completed-10', 'noshow-old', 'noshow-new',
     ]);
     expect(reprinted.lines).toEqual(finalized.lines);
   });

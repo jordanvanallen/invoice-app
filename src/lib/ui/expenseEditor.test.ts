@@ -17,20 +17,21 @@ const settings: Settings = {
 };
 
 describe('expense editor helpers', () => {
-  test('prepares a chronological Preview without moving editor rows', () => {
+  test('prepares a date/description ordered Preview without moving editor rows', () => {
     const draft: ExpenseDraft = {
       seq: 4, year: 2026, reportDate: '2026-07-15',
       periodStart: '2026-07-01', periodEnd: '2026-07-15',
       items: [
         { position: 0, date: '2026-07-10', description: 'Parking', amountCents: 1_250 },
-        { position: 1, date: '2026-07-02', description: 'Fuel', amountCents: 5_000 },
+        { position: 1, date: '2026-07-02', description: 'Fuel 10', amountCents: 5_000 },
+        { position: 2, date: '2026-07-02', description: 'Fuel 2', amountCents: 2_000 },
       ],
     };
 
     const preview = prepareExpensePreview(draft, settings, 4);
 
-    expect(preview.items.map((row) => row.description)).toEqual(['Fuel', 'Parking']);
-    expect(draft.items.map((row) => row.description)).toEqual(['Parking', 'Fuel']);
+    expect(preview.items.map((row) => row.description)).toEqual(['Fuel 2', 'Fuel 10', 'Parking']);
+    expect(draft.items.map((row) => row.description)).toEqual(['Parking', 'Fuel 10', 'Fuel 2']);
   });
 
   test('keeps Preview available while targeting an out-of-range second row', () => {

@@ -25,5 +25,7 @@ describe('invoice Preview sorting contract', () => {
       'buildSnapshot: () => buildFinalizedSnapshot(buildDraft(), currentSettings, draftSeq)',
     );
     expect(page).toContain('onclick={sortInvoiceRows}');
+    expect(page).toContain('Sort rows by date, then inspection #');
+    expect(page).toContain('Rows will be sorted by date, then inspection #.');
   });
 });

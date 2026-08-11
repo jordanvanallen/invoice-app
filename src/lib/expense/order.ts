@@ -1,7 +1,16 @@
 import type { ExpenseItem } from './types';
 
-/** Return a stable chronological copy without mutating the input. */
-export function sortExpenseItems<T extends { date: string }>(items: readonly T[]): T[] {
+function compareDescriptions(a: string, b: string): number {
+  const left = a.trim();
+  const right = b.trim();
+  if (!left && !right) return 0;
+  if (!left) return 1;
+  if (!right) return -1;
+  return left.localeCompare(right, 'en', { numeric: true, sensitivity: 'base' });
+}
+
+/** Return a stable date/description ordered copy without mutating the input. */
+export function sortExpenseItems<T extends { date: string; description: string }>(items: readonly T[]): T[] {
   return items
     .map((item, index) => ({ item, index }))
     .sort((a, b) => {
@@ -9,7 +18,11 @@ export function sortExpenseItems<T extends { date: string }>(items: readonly T[]
       const bBlank = b.item.date === '';
       if (aBlank !== bBlank) return aBlank ? 1 : -1;
       const byDate = a.item.date.localeCompare(b.item.date);
-      return byDate || a.index - b.index;
+      const byDescription = compareDescriptions(
+        a.item.description,
+        b.item.description,
+      );
+      return byDate || byDescription || a.index - b.index;
     })
     .map(({ item }) => item);
 }

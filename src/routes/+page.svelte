@@ -561,7 +561,7 @@
       class="sort-rows"
       disabled={completed.length < 2 && noshow.length < 2}
       onclick={sortInvoiceRows}
-    >Sort rows by date</button>
+    >Sort rows by date, then inspection #</button>
   </div>
 
   <div class="sections">
@@ -612,7 +612,7 @@
   {#if showPreview && previewSnap}
     <div class="preview-overlay" role="dialog" aria-label="Invoice preview" aria-modal="true">
       <div class="preview-bar">
-        <span class="preview-note">Preview — not saved yet. This is how the PDF will look.</span>
+        <span class="preview-note">Preview — not saved yet. Rows are sorted by date, then inspection #.</span>
         <button class="preview-close" onclick={() => (showPreview = false)}>Close preview</button>
       </div>
       <div class="preview-body">
@@ -629,6 +629,7 @@
       <p>{completed.length} completed + {noshow.length} no-shows = {allLines.length} lines</p>
       <p>Subtotal {formatDollars(totals.subtotalCents)} · HST {formatDollars(totals.taxCents)}</p>
       <p style="font-weight:700;font-size:var(--fs-lg)">Total {formatDollars(totals.totalCents)}</p>
+      <p style="color:var(--text-secondary)">Rows will be sorted by date, then inspection #.</p>
       <p style="color:var(--text-secondary)">Once locked, this invoice can't be edited — you can duplicate it to start a new one.</p>
       {#if finalizeError}<p class="err">Couldn't save: {finalizeError}</p>{/if}
     </ConfirmDialog>

@@ -7,25 +7,34 @@ function item(description: string, date: string, position = 0): ExpenseItem {
 }
 
 describe('expense item ordering', () => {
-  test('sorts oldest to newest, preserves equal dates, and puts blanks last', () => {
+  test('sorts by date then natural description and puts blanks last', () => {
     const rows = [
       item('new', '2026-02-01'),
-      item('same-day first', '2026-01-01'),
+      item('Fuel 10', '2026-01-01'),
       item('blank', ''),
-      item('same-day second', '2026-01-01'),
+      item('Fuel 2', '2026-01-01'),
+      item('', '2026-01-01'),
       item('previous year', '2025-12-31'),
     ];
 
     expect(sortExpenseItems(rows).map((row) => row.description)).toEqual([
       'previous year',
-      'same-day first',
-      'same-day second',
+      'Fuel 2',
+      'Fuel 10',
+      '',
       'new',
       'blank',
     ]);
     expect(rows.map((row) => row.description)).toEqual([
-      'new', 'same-day first', 'blank', 'same-day second', 'previous year',
+      'new', 'Fuel 10', 'blank', 'Fuel 2', '', 'previous year',
     ]);
+  });
+
+  test('keeps rows stable when both date and description match', () => {
+    const first = item('Fuel', '2026-01-01', 1);
+    const second = item('fuel', '2026-01-01', 2);
+
+    expect(sortExpenseItems([first, second])).toEqual([first, second]);
   });
 
   test('normalizes positions on copied rows without mutating input rows', () => {

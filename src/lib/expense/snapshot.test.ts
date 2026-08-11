@@ -29,7 +29,8 @@ describe('buildExpenseSnapshot', () => {
       periodEnd: '2026-07-15',
       items: [
         { position: 0, date: '2026-07-10', description: 'Parking', amountCents: 1_250 },
-        { position: 1, date: '2026-07-02', description: 'Fuel', amountCents: 5_000 },
+        { position: 1, date: '2026-07-02', description: 'Fuel 10', amountCents: 5_000 },
+        { position: 2, date: '2026-07-02', description: 'Fuel 2', amountCents: 2_000 },
       ],
     };
 
@@ -47,16 +48,17 @@ describe('buildExpenseSnapshot', () => {
       inspectorNumber: 'ON-123',
       logoDataUrl: 'data:image/png;base64,abc',
       items: [
-        { position: 0, date: '2026-07-02', description: 'Fuel', amountCents: 5_000 },
-        { position: 1, date: '2026-07-10', description: 'Parking', amountCents: 1_250 },
+        { position: 0, date: '2026-07-02', description: 'Fuel 2', amountCents: 2_000 },
+        { position: 1, date: '2026-07-02', description: 'Fuel 10', amountCents: 5_000 },
+        { position: 2, date: '2026-07-10', description: 'Parking', amountCents: 1_250 },
       ],
-      totalCents: 6_250,
+      totalCents: 8_250,
     });
-    expect(snapshot.items[0]).not.toBe(draft.items[1]);
+    expect(snapshot.items[0]).not.toBe(draft.items[2]);
 
-    draft.items[1].description = 'Changed later';
+    draft.items[2].description = 'Changed later';
     settings.inspectorName = 'Changed later';
-    expect(snapshot.items[0].description).toBe('Fuel');
+    expect(snapshot.items[0].description).toBe('Fuel 2');
     expect(snapshot.inspectorName).toBe('North Star Inspections');
   });
 });

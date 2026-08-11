@@ -101,20 +101,22 @@ describe('expense finalization', () => {
       seq: 11,
       items: [
         item({ position: 0, date: '2026-07-10', description: 'Parking', amountCents: 1_250 }),
-        item({ position: 1, date: '2026-07-02', description: 'Fuel', amountCents: 5_000 }),
+        item({ position: 1, date: '2026-07-02', description: 'Fuel 10', amountCents: 5_000 }),
+        item({ position: 2, date: '2026-07-02', description: 'Fuel 2', amountCents: 2_000 }),
       ],
     }));
 
     const snapshot = await finalizeExpenseReport(db, id);
 
     expect(snapshot.reportNumber).toBe('11-2026');
-    expect(snapshot.items.map((row) => row.description)).toEqual(['Fuel', 'Parking']);
-    expect(snapshot.totalCents).toBe(6_250);
+    expect(snapshot.items.map((row) => row.description)).toEqual(['Fuel 2', 'Fuel 10', 'Parking']);
+    expect(snapshot.totalCents).toBe(8_250);
     expect(await loadExpenseDraft(db, id)).toMatchObject({
       seq: 11,
       items: [
-        { position: 0, description: 'Fuel' },
-        { position: 1, description: 'Parking' },
+        { position: 0, description: 'Fuel 2' },
+        { position: 1, description: 'Fuel 10' },
+        { position: 2, description: 'Parking' },
       ],
     });
     expect(await reprintExpenseSnapshot(db, id)).toEqual(snapshot);
