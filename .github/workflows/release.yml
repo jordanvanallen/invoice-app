@@ -6,19 +6,26 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing draft release tag to resume (macOS and publication)'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: ${{ github.ref_name }}
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
   release:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: windows-latest
     outputs:
       release_id: ${{ steps.build.outputs.releaseId }}
@@ -78,9 +85,23 @@ jobs:
     # tauri-action updates latest.json by reading and replacing it. Serialize
     # uploads so macOS retains the Windows updater entries.
     needs: release
+    if: ${{ !cancelled() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch') }}
     runs-on: macos-14
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Resolve the existing draft release
+        id: draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" |
+            jq --slurp --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag and .draft)] | if length == 1 then .[0].id else error("Expected one existing draft release") end')
+          echo "id=$release_id" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         with:
@@ -111,10 +132,23 @@ jobs:
           APPLE_SIGNING_IDENTITY: '-'
         with:
           projectPath: .
-          releaseId: ${{ needs.release.outputs.release_id }}
-          tagName: ${{ github.ref_name }}
+          releaseId: ${{ steps.draft.outputs.id }}
+          tagName: ${{ env.RELEASE_TAG }}
           releaseDraft: true
-          args: --target universal-apple-darwin
+          args: --target universal-apple-darwin --bundles app
+
+      - name: Create the Mac installer disk image
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_root='src-tauri/target/universal-apple-darwin/release/bundle'
+          staging="$RUNNER_TEMP/invoice-dmg-staging"
+          mkdir -p "$staging" "$bundle_root/dmg"
+          ditto "$bundle_root/macos/Invoice Maker.app" "$staging/Invoice Maker.app"
+          ln -s /Applications "$staging/Applications"
+          # Package the sealed app directly; Tauri's bundle_dmg.sh failed on CI.
+          # The DMG itself stays unsigned; its contained app is ad-hoc signed.
+          hdiutil create -volname 'Invoice Maker' -srcfolder "$staging" -format UDZO "$bundle_root/dmg/Invoice.Maker_${RELEASE_TAG#v}_universal.dmg"
 
       - name: Verify the app, updater archive, and DMG
         shell: bash
@@ -137,13 +171,19 @@ jobs:
           trap 'hdiutil detach "$mountpoint"' EXIT
           bash scripts/verify-macos-bundle.sh "$mountpoint/Invoice Maker.app" "$version"
 
+      - name: Upload the verified Mac installer
+        run: gh release upload "$RELEASE_TAG" "src-tauri/target/universal-apple-darwin/release/bundle/dmg/Invoice.Maker_${RELEASE_TAG#v}_universal.dmg" --clobber
+
   publish:
-    needs: [release, macos]
+    needs: macos
+    if: ${{ !cancelled() && needs.macos.result == 'success' }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Install updater signature verifier
         run: sudo apt-get update && sudo apt-get install -y minisign
