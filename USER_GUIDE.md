@@ -1,6 +1,6 @@
 # Invoice Maker — User Guide
 
-A simple guide to installing and using **Invoice Maker** on your Windows PC. No technical knowledge needed — just follow the stages in order.
+A simple guide to installing and using **Invoice Maker** on Windows or Mac. No technical knowledge needed — just follow the stages in order.
 
 Invoice Maker lets you:
 - Build invoices for completed inspections and no‑shows.
@@ -15,13 +15,29 @@ Everything stays **on your computer** — nothing is uploaded anywhere.
 
 ## Stage 1 — Install the app
 
+### Windows
+
 1. Open the downloads/releases page you were given (the **Releases** page on GitHub).
 2. Download the latest **Invoice Maker** installer (the `.exe` or `.msi` file).
 3. Double‑click the downloaded file to run it.
 4. If Windows shows a blue **“Windows protected your PC”** box, click **More info → Run anyway**. (This appears for new apps; it’s safe to proceed.)
 5. Follow the installer. When it finishes, open **Invoice Maker** from the Start menu or desktop.
 
-You only do this once. Future updates install themselves (see **Stage 9**).
+### macOS
+
+The **universal `.dmg`** works on both Apple silicon and Intel Macs. For the Mac installation fix, use **v0.3.3 or newer**.
+
+1. Open the [official Invoice Maker Releases page](https://github.com/jordanvanallen/invoice-app/releases/latest) and download the Mac file ending in **`_universal.dmg`**.
+2. Double-click the DMG. Drag **Invoice Maker** into the **Applications** folder shown in the window. If replacing v0.3.2, quit the old app first and choose **Replace** when Finder asks.
+3. Open **Applications** in Finder and double-click **Invoice Maker** there. Once copied, you can eject the disk image.
+4. If macOS says the developer cannot be verified or Apple cannot check the app for malicious software, dismiss the warning. Open **Apple menu → System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway** for Invoice Maker.
+5. Confirm **Open** and enter your Mac login password if asked. After this app-specific approval, you can open the app normally. If **Open Anyway** is missing, try opening the app from Applications again, then return to Privacy & Security.
+
+The app has a signature that checks its files for changes, but it has **not been notarized by Apple**. This is why the first-open approval is required. Approve only the copy downloaded from the official release above. See [Apple's instructions for opening an app from an unknown developer](https://support.apple.com/en-ca/guide/mac-help/mh40616/mac).
+
+**Upgrading from the damaged v0.3.2 Mac build:** replace the app using these steps. Your invoices and settings are stored separately from the app. If a fresh v0.3.3 or newer copy still reports that it is **damaged**, report the exact warning and your macOS version so it can be investigated.
+
+Future updates are offered inside the app (see **Stage 9**).
 
 ---
 
@@ -164,7 +180,7 @@ Invoice Maker protects your data automatically:
 
 ## Stage 9 — Updates
 
-You don’t need to download new versions manually.
+After installation, the app can download updates for you. If the old v0.3.2 Mac app cannot open, first install the replacement DMG using **Stage 1**.
 
 - When you open the app, it checks for a newer version and **offers to update** with one click (it installs and restarts itself).
 - You can also check on demand: **Settings → About & updates → Check for updates**.
@@ -191,6 +207,8 @@ Everything you can adjust, in **Settings**:
 | Question | Answer |
 |---|---|
 | **“Windows protected your PC” when installing** | Click **More info → Run anyway**. Normal for new apps. |
+| **Mac says the developer cannot be verified or Apple cannot check the app** | After copying the official release to **Applications** and trying to open it, use **System Settings → Privacy & Security → Open Anyway**. See **Stage 1 → macOS**. |
+| **Mac says v0.3.2 is damaged** | Download the v0.3.3 or newer universal DMG from the official Releases page and replace the old app using **Stage 1 → macOS**. |
 | **My PDF didn’t appear** | Check the folder shown in the save message, or **Settings → Where files are saved → Open this folder**. |
 | **“Date is outside the billing period” warning** | Just informational — it won’t stop you saving or finalizing. |
 | **I cancelled an invoice by accident** | Invoice History → red **Cancelled invoices** button → **Restore**. |
