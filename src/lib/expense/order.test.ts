@@ -18,26 +18,35 @@ function item(
 
 const legacyRows = () => [
   legacyItem('new', '2026-02-01'),
-  legacyItem('same-day first', '2026-01-01'),
+  legacyItem('Fuel 10', '2026-01-01'),
   legacyItem('blank', ''),
-  legacyItem('same-day second', '2026-01-01'),
+  legacyItem('Fuel 2', '2026-01-01'),
+  legacyItem('', '2026-01-01'),
   legacyItem('previous year', '2025-12-31'),
 ];
 
 describe('legacy flat expense ordering (rows without a category)', () => {
-  test('sorts oldest to newest, preserves equal dates, and puts blanks last', () => {
+  test('sorts by date then natural description and puts blanks last', () => {
     const rows = legacyRows();
 
     expect(sortExpenseItems(rows).map((row) => row.description)).toEqual([
       'previous year',
-      'same-day first',
-      'same-day second',
+      'Fuel 2',
+      'Fuel 10',
+      '',
       'new',
       'blank',
     ]);
     expect(rows.map((row) => row.description)).toEqual([
-      'new', 'same-day first', 'blank', 'same-day second', 'previous year',
+      'new', 'Fuel 10', 'blank', 'Fuel 2', '', 'previous year',
     ]);
+  });
+
+  test('keeps rows stable when both date and description match', () => {
+    const first = legacyItem('Fuel', '2026-01-01', 1);
+    const second = legacyItem('fuel', '2026-01-01', 2);
+
+    expect(sortExpenseItems([first, second])).toEqual([first, second]);
   });
 
   test('orders rows defaulted to General/Admin exactly like the pre-section flat sort', () => {
@@ -49,21 +58,23 @@ describe('legacy flat expense ordering (rows without a category)', () => {
 });
 
 describe('sectioned expense ordering', () => {
-  test('groups Vehicle before General/Admin and sorts each section by date', () => {
+  test('groups Vehicle before General/Admin and sorts each section by date, then description', () => {
     const rows = [
-      item('office paper', '2026-07-03', 'general'),
-      item('fuel late', '2026-07-09', 'vehicle'),
+      item('postage same day', '2026-07-03', 'general'),
+      item('Fuel 10', '2026-07-09', 'vehicle'),
       item('phone', '2026-07-01', 'general'),
       item('vehicle blank', '', 'vehicle'),
       item('fuel early', '2026-07-02', 'vehicle'),
-      item('postage same day', '2026-07-03', 'general'),
+      item('office paper', '2026-07-03', 'general'),
+      item('Fuel 2', '2026-07-09', 'vehicle'),
     ];
     const before = structuredClone(rows);
 
     expect(sortExpenseItemsBySection(rows).map((row) => `${row.category}:${row.description}`))
       .toEqual([
         'vehicle:fuel early',
-        'vehicle:fuel late',
+        'vehicle:Fuel 2',
+        'vehicle:Fuel 10',
         'vehicle:vehicle blank',
         'general:phone',
         'general:office paper',

@@ -160,13 +160,14 @@ describe('expense editor sections', () => {
     expect(removeExpenseEditorRow(sections, 'expense-item-missing')).toBeNull();
   });
 
-  test('sorts each section by date without mixing sections or mutating the editor rows', () => {
+  test('sorts each section by date, then description, without mixing sections or mutating the editor rows', () => {
     const sections = expenseEditorSections([
       item({ position: 0, category: 'vehicle', date: '2026-07-09', description: 'Fuel late' }),
       item({ position: 1, category: 'vehicle', date: '', description: 'Undated' }),
       item({ position: 2, category: 'vehicle', date: '2026-07-02', description: 'Fuel early' }),
-      item({ position: 3, category: 'general', date: '2026-07-05', description: 'Ink' }),
+      item({ position: 3, category: 'general', date: '2026-07-05', description: 'Postage' }),
       item({ position: 4, category: 'general', date: '2026-07-01', description: 'Phone' }),
+      item({ position: 5, category: 'general', date: '2026-07-05', description: 'Ink' }),
     ]);
     const before = structuredClone(sections);
 
@@ -174,7 +175,7 @@ describe('expense editor sections', () => {
 
     expect(describeRows(sorted)).toEqual({
       vehicle: ['Fuel early', 'Fuel late', 'Undated'],
-      general: ['Phone', 'Ink'],
+      general: ['Phone', 'Ink', 'Postage'],
     });
     expect(sections).toEqual(before);
     expect(expenseDraftItems(sorted)).toEqual(orderExpenseItems(expenseDraftItems(sections)));
@@ -197,22 +198,23 @@ describe('expense editor focus targets', () => {
 });
 
 describe('expense editor validation helpers', () => {
-  test('prepares a sectioned chronological Preview without moving editor rows', () => {
+  test('prepares a sectioned date/description ordered Preview without moving editor rows', () => {
     const sections = expenseEditorSections([
       item({ position: 0, category: 'general', date: '2026-07-10', description: 'Postage', amountCents: 1_250 }),
       item({ position: 1, category: 'vehicle', date: '2026-07-12', description: 'Parking', amountCents: 800 }),
-      item({ position: 2, category: 'vehicle', date: '2026-07-02', description: 'Fuel', amountCents: 5_000 }),
+      item({ position: 2, category: 'vehicle', date: '2026-07-02', description: 'Fuel 10', amountCents: 5_000 }),
+      item({ position: 3, category: 'vehicle', date: '2026-07-02', description: 'Fuel 2', amountCents: 2_000 }),
     ]);
     const draft = draftOf(sections);
 
     const preview = prepareExpensePreview(draft, settings, 4);
 
     expect(preview.items.map((row) => `${row.category}:${row.description}`))
-      .toEqual(['vehicle:Fuel', 'vehicle:Parking', 'general:Postage']);
+      .toEqual(['vehicle:Fuel 2', 'vehicle:Fuel 10', 'vehicle:Parking', 'general:Postage']);
     expect(preview).toMatchObject({
-      vehicleSubtotalCents: 5_800, generalSubtotalCents: 1_250, totalCents: 7_050,
+      vehicleSubtotalCents: 7_800, generalSubtotalCents: 1_250, totalCents: 9_050,
     });
-    expect(describeRows(sections)).toEqual({ vehicle: ['Parking', 'Fuel'], general: ['Postage'] });
+    expect(describeRows(sections)).toEqual({ vehicle: ['Parking', 'Fuel 10', 'Fuel 2'], general: ['Postage'] });
   });
 
   test('keeps Preview available while targeting an out-of-range row', () => {

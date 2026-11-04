@@ -1,6 +1,6 @@
 # Invoice Maker — User Guide
 
-A simple guide to installing and using **Invoice Maker** on your Windows PC. No technical knowledge needed — just follow the stages in order.
+A simple guide to installing and using **Invoice Maker** on Windows or Mac. No technical knowledge needed — just follow the stages in order.
 
 Invoice Maker lets you:
 - Build invoices for completed inspections and no‑shows.
@@ -16,13 +16,29 @@ Everything stays **on your computer** — nothing is uploaded anywhere.
 
 ## Stage 1 — Install the app
 
+### Windows
+
 1. Open the downloads/releases page you were given (the **Releases** page on GitHub).
 2. Download the latest **Invoice Maker** installer (the `.exe` or `.msi` file).
 3. Double‑click the downloaded file to run it.
 4. If Windows shows a blue **“Windows protected your PC”** box, click **More info → Run anyway**. (This appears for new apps; it’s safe to proceed.)
 5. Follow the installer. When it finishes, open **Invoice Maker** from the Start menu or desktop.
 
-You only do this once. Future updates install themselves (see **Stage 9**).
+### macOS
+
+The **universal `.dmg`** works on both Apple silicon and Intel Macs. For the Mac installation fix, use **v0.3.3 or newer**.
+
+1. Open the [official Invoice Maker Releases page](https://github.com/jordanvanallen/invoice-app/releases/latest) and download the Mac file ending in **`_universal.dmg`**.
+2. Double-click the DMG. Drag **Invoice Maker** into the **Applications** folder shown in the window. If replacing v0.3.2, quit the old app first and choose **Replace** when Finder asks.
+3. Open **Applications** in Finder and double-click **Invoice Maker** there. Once copied, you can eject the disk image.
+4. If macOS says the developer cannot be verified or Apple cannot check the app for malicious software, dismiss the warning. Open **Apple menu → System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway** for Invoice Maker.
+5. Confirm **Open** and enter your Mac login password if asked. After this app-specific approval, you can open the app normally. If **Open Anyway** is missing, try opening the app from Applications again, then return to Privacy & Security.
+
+The app has a signature that checks its files for changes, but it has **not been notarized by Apple**. This is why the first-open approval is required. Approve only the copy downloaded from the official release above. See [Apple's instructions for opening an app from an unknown developer](https://support.apple.com/en-ca/guide/mac-help/mh40616/mac).
+
+**Upgrading from the damaged v0.3.2 Mac build:** replace the app using these steps. Your invoices and settings are stored separately from the app. If a fresh v0.3.3 or newer copy still reports that it is **damaged**, report the exact warning and your macOS version so it can be investigated.
+
+Future updates are offered inside the app (see **Stage 9**).
 
 ---
 
@@ -60,6 +76,8 @@ In this guide, **Expenses → History** means the **History** item in the **Expe
 
 Open **New Invoice**. It starts as a **draft** (a yellow “DRAFT — not sent yet” tag) and **autosaves as you type**, so you won’t lose work.
 
+If more than one unfinished invoice is saved (for example after duplicating one), a yellow bar above the invoice lets you choose which draft to continue, or discard the one you’re editing after confirming. The open invoice is saved first; if that save fails, nothing is switched or discarded until it saves.
+
 **4a. Set the dates (top of the page)**
 - **Billing period** — the *From* and *To* dates the invoice covers. Click a date field, pick a day on the calendar, and it closes. From and To are independent — set each one.
 - **Invoice date** — the date on the invoice itself (defaults to today).
@@ -81,7 +99,7 @@ The **No‑Shows** section works the same way (default $25 each), including opti
 
 **Put rows in date order**
 
-Rows stay exactly where they are while you type. When you are ready, click **Sort rows by date** to arrange Completed Inspections and No-Shows separately from oldest to newest. Opening Preview also sorts the visible rows first, so closing Preview returns to the same order you reviewed. Lock & Save uses this date order automatically. Rows from the same day stay in their current order.
+Rows stay exactly where they are while you type. When you are ready, click **Sort rows by date, then inspection #** to arrange Completed Inspections and No-Shows separately from oldest to newest; rows from the same day are ordered by inspection number. Opening Preview also sorts the visible rows first, so closing Preview returns to the same order you reviewed. Lock & Save uses this order automatically.
 
 **4d. Watch the totals**
 The bar at the bottom always shows **Subtotal**, **HST**, and **Total** as you go. A note like “Date is outside the billing period” is just a friendly heads‑up — it does **not** stop you from saving.
@@ -106,7 +124,7 @@ Use **Approvers** in the sidebar to rename, hide, or remove names. Names used on
 
 Once locked, the invoice becomes a permanent record. You can always reprint it from History.
 
-> Where do PDFs go? By default your **Downloads** folder, filed in a folder for each year (for example `2026-invoices`). You can change this in **Settings → General → Where invoices are saved**; the same folder holds your expense and mileage report PDFs.
+> Where do PDFs go? By default your **Downloads** folder, filed in a folder for each year (for example `2026-invoices`). You can change this in **Settings → General → Where PDFs are saved**; the same folder holds your expense and mileage report PDFs.
 
 ### Create an expense report
 
@@ -115,8 +133,8 @@ Once locked, the invoice becomes a permanent record. You can always reprint it f
 3. The report has two sections, like an invoice: **Vehicle expenses** and **General/Admin expenses**. Click **+ Add a vehicle expense** or **+ Add a general/admin expense** to add a row to that section, then fill in its **Date**, **Description**, and **Amount**. Use the **✕** to remove a row. If you remove one by accident, choose **Undo**.
 4. Put a row in the wrong section? Click its arrow button (**↓** in Vehicle expenses, **↑** in General/Admin expenses) to move it to the other section. Everything you typed moves with it.
 5. Each section shows its own **subtotal**, and the report **total** is the two subtotals added together. A report needs at least one expense, but either section may be left empty.
-6. Rows stay still while you type. Click **Sort rows by date** to arrange each section from oldest to newest. Opening **Preview** also sorts the editor first, so closing Preview returns to the same order you reviewed.
-7. Click **Lock & Save** when every row is complete. The app sorts each section by date, creates a PDF showing both sections with their subtotals and the total, files it in that year’s folder (for example `2026-expenses`), and backs up your data.
+6. Rows stay still while you type. Click **Sort rows by date, then description** to arrange each section from oldest to newest; rows from the same day are ordered by description. Opening **Preview** also sorts the editor first, so closing Preview returns to the same order you reviewed.
+7. Click **Lock & Save** when every row is complete. The app sorts each section by date, then description, creates a PDF showing both sections with their subtotals and the total, files it in that year’s folder (for example `2026-expenses`), and backs up your data.
 
 Locked expense reports cannot be edited. Open **Expenses → History** to view or save the PDF again, duplicate one into a new editable draft, or cancel and restore a report. Cancelled expense reports are kept in a separate **Cancelled expense reports** section and do not count in yearly expense totals.
 
@@ -178,13 +196,13 @@ Invoice Maker protects your data automatically:
 - You can back up any time from **Settings → Backups → Back up now**. The last backup time shows at the bottom of the left menu.
 - To bring back your data from a backup — for example on a new computer — use **Settings → Backups → Restore from a backup**. The app checks the file first, shows what it contains (including how many invoices, expense reports, and mileage reports were locked), and saves a copy of your current data before replacing it.
 
-**Strongly recommended:** set **Settings → Backups → Where backups are saved** (and, if you like, **Settings → General → Where invoices are saved** for PDFs) to a **Dropbox**, **OneDrive**, or **Google Drive** folder. Then your backups and PDFs are copied off your computer automatically — so you’re safe even if the PC fails.
+**Strongly recommended:** set **Settings → Backups → Where backups are saved** (and, if you like, **Settings → General → Where PDFs are saved** for PDFs) to a **Dropbox**, **OneDrive**, or **Google Drive** folder. Then your backups and PDFs are copied off your computer automatically — so you’re safe even if the PC fails.
 
 ---
 
 ## Stage 9 — Updates
 
-You don’t need to download new versions manually.
+After installation, the app can download updates for you. If the old v0.3.2 Mac app cannot open, first install the replacement DMG using **Stage 1**.
 
 - When you open the app, it checks for a newer version and **offers to update** with one click (it installs and restarts itself).
 - You can also check on demand: **Settings → About & updates → Check for updates**.
@@ -198,7 +216,7 @@ You don’t need to download new versions manually.
 Everything you can adjust, in **Settings → General**:
 
 - **Display** — Dark/Light theme and text size (Normal / Large / Extra‑large).
-- **Where invoices are saved** — choose the folder for all your PDFs (invoices, expense reports, and mileage reports), or open it.
+- **Where PDFs are saved** — choose the folder for all your PDFs (invoices, expense reports, and mileage reports), or open it.
 - **You / your business** — your name, address, inspector number.
 - **Tax** — HST registration number and tax rate (default 13%).
 - **Default prices** — completed and no‑show fees.
@@ -215,14 +233,16 @@ And in **Settings → Backups**: where backups are saved, **Back up now**, and *
 | Question | Answer |
 |---|---|
 | **“Windows protected your PC” when installing** | Click **More info → Run anyway**. Normal for new apps. |
-| **My PDF didn’t appear** | Check the folder shown in the save message, or **Settings → General → Where invoices are saved → Open this folder**. |
+| **Mac says the developer cannot be verified or Apple cannot check the app** | After copying the official release to **Applications** and trying to open it, use **System Settings → Privacy & Security → Open Anyway**. See **Stage 1 → macOS**. |
+| **Mac says v0.3.2 is damaged** | Download the v0.3.3 or newer universal DMG from the official Releases page and replace the old app using **Stage 1 → macOS**. |
+| **My PDF didn’t appear** | Check the folder shown in the save message, or **Settings → General → Where PDFs are saved → Open this folder**. |
 | **“Date is outside the billing period” warning** | Just informational — it won’t stop you saving or finalizing. |
 | **I cancelled an invoice by accident** | **Invoices → History** → red **Cancelled invoices** button → **Restore**. |
 | **I cancelled an expense report by accident** | **Expenses → History** → **Cancelled expense reports** → **Restore**. |
 | **I cancelled a mileage report by accident** | **Car Mileage → History** → find it among the cancelled mileage reports → **Restore**. |
 | **I can’t lock my mileage report** | Every trip needs both odometer readings in whole kilometres, the end reading greater than the start, and a date inside the reporting period. |
 | **An expense is in the wrong section** | Click the row’s arrow button to move it between **Vehicle expenses** and **General/Admin expenses**. |
-| **It says “Couldn’t save — retrying” and won’t let me leave the page** | Your latest changes are still on screen and it keeps trying to save them; the app won’t switch pages until they’re saved, so nothing is lost. Try again once it shows **Saved**. On a new invoice, also check that the invoice number is valid. |
+| **It says “Couldn’t save — retrying” and won’t let me leave the page** | Your latest changes are still on screen and it keeps trying to save them; the app won’t switch pages until they’re saved, so nothing is lost. Try again once it shows **Saved**. (An invalid invoice number doesn’t cause this: the rest of the invoice still saves, and the last valid number is kept until you fix it.) |
 | **Text is too small to read** | **Settings → Display → Large** or **Extra‑large**. |
 | **Is my data safe / backed up?** | Yes — it backs up every time you lock an invoice or report, and whenever you choose **Back up now**. Point **Settings → Backups → Where backups are saved** at Dropbox/OneDrive for an off‑machine copy. |
 | **How do I get the newest version?** | It updates itself on launch, or use **Settings → Check for updates**. |

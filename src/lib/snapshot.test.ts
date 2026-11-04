@@ -86,23 +86,24 @@ describe('buildFinalizedSnapshot', () => {
     });
   });
 
-  test('orders each invoice section by date without mutating the draft', () => {
+  test('orders each invoice section by date then inspection number without mutating the draft', () => {
     const source = draft();
     source.lines = [
-      { ...completed(), inspectionNumber: 'completed-new', date: '2026-05-27', position: 0 },
+      { ...completed(), inspectionNumber: 'completed-10', date: '2026-05-27', position: 0 },
       { ...completed(), type: 'noshow', inspectionNumber: 'noshow-new', date: '2026-05-26', position: 1 },
       { ...completed(), inspectionNumber: 'completed-old', date: '2026-05-21', position: 2 },
       { ...completed(), type: 'noshow', inspectionNumber: 'noshow-old', date: '2026-05-20', position: 3 },
+      { ...completed(), inspectionNumber: 'completed-2', date: '2026-05-27', position: 4 },
     ];
 
     const snap = buildFinalizedSnapshot(source, settings(), 8);
 
     expect(snap.lines.map((line) => line.inspectionNumber)).toEqual([
-      'completed-old', 'completed-new', 'noshow-old', 'noshow-new',
+      'completed-old', 'completed-2', 'completed-10', 'noshow-old', 'noshow-new',
     ]);
-    expect(snap.lines.map((line) => line.position)).toEqual([0, 1, 2, 3]);
+    expect(snap.lines.map((line) => line.position)).toEqual([0, 1, 2, 3, 4]);
     expect(source.lines.map((line) => line.inspectionNumber)).toEqual([
-      'completed-new', 'noshow-new', 'completed-old', 'noshow-old',
+      'completed-10', 'noshow-new', 'completed-old', 'noshow-old', 'completed-2',
     ]);
   });
 });

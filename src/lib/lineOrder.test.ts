@@ -27,25 +27,33 @@ function line(
 }
 
 describe('sortRowsByDate', () => {
-  test('sorts oldest to newest, keeps equal dates stable, and puts blanks last', () => {
+  test('sorts by date then natural inspection number and puts blanks last', () => {
     const rows = [
-      line('same-1', '2026-07-12'),
-      line('blank-1', ''),
-      line('newest', '2026-07-14'),
-      line('same-2', '2026-07-12'),
-      line('oldest', '2026-07-10'),
+      line('INSP-10', '2026-07-12'),
       line('blank-2', ''),
+      line('newest', '2026-07-14'),
+      line('INSP-2', '2026-07-12'),
+      line('', '2026-07-12'),
+      line('oldest', '2026-07-10'),
+      line('blank-1', ''),
     ];
 
     const sorted = sortRowsByDate(rows);
 
     expect(sorted.map((row) => row.inspectionNumber)).toEqual([
-      'oldest', 'same-1', 'same-2', 'newest', 'blank-1', 'blank-2',
+      'oldest', 'INSP-2', 'INSP-10', '', 'newest', 'blank-1', 'blank-2',
     ]);
     expect(rows.map((row) => row.inspectionNumber)).toEqual([
-      'same-1', 'blank-1', 'newest', 'same-2', 'oldest', 'blank-2',
+      'INSP-10', 'blank-2', 'newest', 'INSP-2', '', 'oldest', 'blank-1',
     ]);
     expect(sorted).not.toBe(rows);
+  });
+
+  test('keeps rows stable when both date and inspection number match', () => {
+    const first = line('SAME', '2026-07-12', 'completed', 1);
+    const second = line('same', '2026-07-12', 'completed', 2);
+
+    expect(sortRowsByDate([first, second])).toEqual([first, second]);
   });
 
   test('sorts chronologically across month and year boundaries', () => {
@@ -67,19 +75,20 @@ describe('sortRowsByDate', () => {
 describe('orderInvoiceLines', () => {
   test('orders completed and no-show sections independently and rewrites positions', () => {
     const lines = [
-      line('completed-new', '2026-07-14', 'completed', 8),
+      line('completed-10', '2026-07-14', 'completed', 8),
       line('noshow-new', '2026-07-13', 'noshow', 3),
       line('completed-old', '2026-07-10', 'completed', 6),
       line('noshow-old', '2026-07-09', 'noshow', 2),
+      line('completed-2', '2026-07-14', 'completed', 9),
     ];
 
     const ordered = orderInvoiceLines(lines);
 
     expect(ordered.map((row) => row.inspectionNumber)).toEqual([
-      'completed-old', 'completed-new', 'noshow-old', 'noshow-new',
+      'completed-old', 'completed-2', 'completed-10', 'noshow-old', 'noshow-new',
     ]);
-    expect(ordered.map((row) => row.position)).toEqual([0, 1, 2, 3]);
-    expect(lines.map((row) => row.position)).toEqual([8, 3, 6, 2]);
+    expect(ordered.map((row) => row.position)).toEqual([0, 1, 2, 3, 4]);
+    expect(lines.map((row) => row.position)).toEqual([8, 3, 6, 2, 9]);
     expect(ordered[0]).not.toBe(lines[2]);
   });
 });
@@ -87,8 +96,9 @@ describe('orderInvoiceLines', () => {
 describe('sortInvoiceSections', () => {
   test('sorts completed and no-show rows independently without mutating either list', () => {
     const completed = [
-      line('completed-new', '2026-07-14'),
+      line('completed-10', '2026-07-14'),
       line('completed-old', '2026-07-10'),
+      line('completed-2', '2026-07-14'),
     ];
     const noshow = [
       line('noshow-new', '2026-07-13', 'noshow'),
@@ -98,13 +108,13 @@ describe('sortInvoiceSections', () => {
     const sorted = sortInvoiceSections(completed, noshow);
 
     expect(sorted.completed.map((row) => row.inspectionNumber)).toEqual([
-      'completed-old', 'completed-new',
+      'completed-old', 'completed-2', 'completed-10',
     ]);
     expect(sorted.noshow.map((row) => row.inspectionNumber)).toEqual([
       'noshow-old', 'noshow-new',
     ]);
     expect(completed.map((row) => row.inspectionNumber)).toEqual([
-      'completed-new', 'completed-old',
+      'completed-10', 'completed-old', 'completed-2',
     ]);
     expect(noshow.map((row) => row.inspectionNumber)).toEqual([
       'noshow-new', 'noshow-old',

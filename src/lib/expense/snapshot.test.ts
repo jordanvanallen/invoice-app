@@ -57,7 +57,8 @@ describe('buildExpenseSnapshot', () => {
     const source = draft([
       { position: 0, category: 'general', date: '2026-07-10', description: 'Postage', amountCents: 1_250 },
       { position: 1, category: 'vehicle', date: '2026-07-12', description: 'Parking', amountCents: 800 },
-      { position: 2, category: 'vehicle', date: '2026-07-02', description: 'Fuel', amountCents: 5_000 },
+      { position: 2, category: 'vehicle', date: '2026-07-02', description: 'Fuel 10', amountCents: 5_000 },
+      { position: 3, category: 'vehicle', date: '2026-07-02', description: 'Fuel 2', amountCents: 2_000 },
     ]);
     const liveSettings = settings();
 
@@ -76,25 +77,27 @@ describe('buildExpenseSnapshot', () => {
       inspectorNumber: 'ON-123',
       logoDataUrl: 'data:image/png;base64,abc',
       items: [
-        { position: 0, category: 'vehicle', date: '2026-07-02', description: 'Fuel', amountCents: 5_000 },
-        { position: 1, category: 'vehicle', date: '2026-07-12', description: 'Parking', amountCents: 800 },
-        { position: 2, category: 'general', date: '2026-07-10', description: 'Postage', amountCents: 1_250 },
+        { position: 0, category: 'vehicle', date: '2026-07-02', description: 'Fuel 2', amountCents: 2_000 },
+        { position: 1, category: 'vehicle', date: '2026-07-02', description: 'Fuel 10', amountCents: 5_000 },
+        { position: 2, category: 'vehicle', date: '2026-07-12', description: 'Parking', amountCents: 800 },
+        { position: 3, category: 'general', date: '2026-07-10', description: 'Postage', amountCents: 1_250 },
       ],
-      vehicleSubtotalCents: 5_800,
+      vehicleSubtotalCents: 7_800,
       generalSubtotalCents: 1_250,
-      totalCents: 7_050,
+      totalCents: 9_050,
     });
     expect(isSectionedExpenseSnapshot(snapshot)).toBe(true);
+    expect(snapshot.items[0]).not.toBe(source.items[3]);
 
     source.items[2].description = 'Changed later';
     source.items[2].category = 'general';
-    source.items.push({ position: 3, category: 'vehicle', date: '2026-07-03', description: 'Late', amountCents: 1 });
+    source.items.push({ position: 4, category: 'vehicle', date: '2026-07-03', description: 'Late', amountCents: 1 });
     liveSettings.inspectorName = 'Changed later';
     expect(snapshot.items.map((row) => `${row.category}:${row.description}`)).toEqual([
-      'vehicle:Fuel', 'vehicle:Parking', 'general:Postage',
+      'vehicle:Fuel 2', 'vehicle:Fuel 10', 'vehicle:Parking', 'general:Postage',
     ]);
     expect(snapshot.inspectorName).toBe('North Star Inspections');
-    expect(snapshot.totalCents).toBe(7_050);
+    expect(snapshot.totalCents).toBe(9_050);
   });
 
   test.each<[string, ExpenseCategory[], [number, number]]>([

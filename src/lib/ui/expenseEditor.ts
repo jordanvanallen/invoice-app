@@ -172,7 +172,7 @@ export function restoreExpenseEditorRow(
   return { ...sections, [removed.category]: rows };
 }
 
-/** Sort each section by date (blanks last) into new arrays, never mixing sections. */
+/** Sort each section by date, then description (blanks last), into new arrays, never mixing sections. */
 export function sortExpenseEditorSections(sections: ExpenseEditorSections): ExpenseEditorSections {
   return { vehicle: sortExpenseItems(sections.vehicle), general: sortExpenseItems(sections.general) };
 }

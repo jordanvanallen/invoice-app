@@ -1,18 +1,34 @@
 name: Release
 
-# Push a version tag (e.g. v0.1.0) to build, sign, and publish a release
-# that the installed app auto-updates from.
+# Keep releases private until Windows and macOS artifacts have passed validation.
+# macOS uses ad-hoc signing; users approve its first launch in Privacy & Security.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing draft release tag to resume (macOS and publication)'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+
 jobs:
   release:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: windows-latest
+    outputs:
+      release_id: ${{ steps.build.outputs.releaseId }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,7 +44,7 @@ jobs:
         run: npm ci
 
       - name: Sync app version from tag
-        run: node -e "const fs=require('fs'); const version='${{ github.ref_name }}'.replace(/^v/,''); for (const file of ['package.json','src-tauri/tauri.conf.json']) { const json=JSON.parse(fs.readFileSync(file,'utf8')); json.version=version; fs.writeFileSync(file, JSON.stringify(json,null,2)+'\n'); }"
+        run: node -e "const fs=require('fs'); const version=process.env.RELEASE_TAG.replace(/^v/,''); for (const file of ['package.json','src-tauri/tauri.conf.json']) { const json=JSON.parse(fs.readFileSync(file,'utf8')); json.version=version; fs.writeFileSync(file, JSON.stringify(json,null,2)+'\n'); }"
 
       # Separate steps (not one multi-line block): on the windows-latest pwsh
       # shell a multi-line run wouldn't abort on the first failure, so a failed
@@ -46,7 +62,8 @@ jobs:
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
-      - name: Build, sign, and publish release
+      - name: Build Windows updater artifacts in a draft release
+        id: build
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -57,6 +74,125 @@ jobs:
           projectPath: .
           tagName: ${{ github.ref_name }}
           releaseName: 'Invoice Maker ${{ github.ref_name }}'
-          releaseBody: 'Automated build. The app will offer this update automatically.'
-          releaseDraft: false
+          releaseBody: |
+            Windows and universal macOS builds, with signed automatic updates.
+
+            macOS: Open the DMG and drag Invoice Maker to Applications. The app is ad-hoc signed, but is not Apple-notarized. On first launch, macOS may block it: open System Settings > Privacy & Security, choose Open Anyway for Invoice Maker, and confirm Open. This is a one-time approval for this installation.
+          releaseDraft: true
           prerelease: false
+
+  macos:
+    # tauri-action updates latest.json by reading and replacing it. Serialize
+    # uploads so macOS retains the Windows updater entries.
+    needs: release
+    if: ${{ !cancelled() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    runs-on: macos-14
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Resolve the existing draft release
+        id: draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" |
+            jq --slurp --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag and .draft)] | if length == 1 then .[0].id else error("Expected one existing draft release") end')
+          echo "id=$release_id" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Sync app version from tag
+        run: node -e "const fs=require('fs'); const version=process.env.RELEASE_TAG.replace(/^v/,''); for (const file of ['package.json','src-tauri/tauri.conf.json']) { const json=JSON.parse(fs.readFileSync(file,'utf8')); json.version=version; fs.writeFileSync(file, JSON.stringify(json,null,2)+'\n'); }"
+
+      - name: Rust tests on macOS
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Build universal macOS updater artifacts in the draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+          # Seal the entire app bundle, including Info.plist and resources.
+          # Developer ID signing and notarization require an Apple Developer account.
+          APPLE_SIGNING_IDENTITY: '-'
+        with:
+          projectPath: .
+          releaseId: ${{ steps.draft.outputs.id }}
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseDraft: true
+          args: --target universal-apple-darwin --bundles app
+
+      - name: Create the Mac installer disk image
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_root='src-tauri/target/universal-apple-darwin/release/bundle'
+          staging="$RUNNER_TEMP/invoice-dmg-staging"
+          mkdir -p "$staging" "$bundle_root/dmg"
+          ditto "$bundle_root/macos/Invoice Maker.app" "$staging/Invoice Maker.app"
+          ln -s /Applications "$staging/Applications"
+          # Package the sealed app directly; Tauri's bundle_dmg.sh failed on CI.
+          # The DMG itself stays unsigned; its contained app is ad-hoc signed.
+          hdiutil create -volname 'Invoice Maker' -srcfolder "$staging" -format UDZO "$bundle_root/dmg/Invoice.Maker_${RELEASE_TAG#v}_universal.dmg"
+
+      - name: Verify the app, updater archive, and DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_root='src-tauri/target/universal-apple-darwin/release/bundle'
+          version="${RELEASE_TAG#v}"
+          bash scripts/verify-macos-bundle.sh "$bundle_root/macos/Invoice Maker.app" "$version"
+
+          mkdir "$RUNNER_TEMP/invoice-updater"
+          tar -xzf "$bundle_root/macos/Invoice Maker.app.tar.gz" -C "$RUNNER_TEMP/invoice-updater"
+          bash scripts/verify-macos-bundle.sh "$RUNNER_TEMP/invoice-updater/Invoice Maker.app" "$version"
+
+          images=("$bundle_root"/dmg/*.dmg)
+          test "${#images[@]}" -eq 1
+          test -f "${images[0]}"
+          mountpoint="$RUNNER_TEMP/invoice-release-dmg"
+          mkdir "$mountpoint"
+          hdiutil attach "${images[0]}" -readonly -nobrowse -mountpoint "$mountpoint"
+          trap 'hdiutil detach "$mountpoint"' EXIT
+          bash scripts/verify-macos-bundle.sh "$mountpoint/Invoice Maker.app" "$version"
+
+      - name: Upload the verified Mac installer
+        run: gh release upload "$RELEASE_TAG" "src-tauri/target/universal-apple-darwin/release/bundle/dmg/Invoice.Maker_${RELEASE_TAG#v}_universal.dmg" --clobber
+
+  publish:
+    needs: macos
+    if: ${{ !cancelled() && needs.macos.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Install updater signature verifier
+        run: sudo apt-get update && sudo apt-get install -y minisign
+
+      - name: Download draft release artifacts
+        run: gh release download "$RELEASE_TAG" --dir release-artifacts
+
+      - name: Validate complete updater manifest and signatures
+        run: python3 scripts/verify-release.py "$RELEASE_TAG" release-artifacts
+
+      - name: Publish the verified release
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest

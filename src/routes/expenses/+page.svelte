@@ -511,7 +511,7 @@
   {/if}
 
   <div class="row-tools">
-    <button type="button" class="secondary-button" disabled={!canSort} onclick={sortExpenseRows}>Sort rows by date</button>
+    <button type="button" class="secondary-button" disabled={!canSort} onclick={sortExpenseRows}>Sort rows by date, then description</button>
   </div>
 
   <div class="sections">
@@ -548,7 +548,7 @@
     <div class="preview-overlay" role="dialog" aria-label="Expense report preview" aria-modal="true"
       tabindex="-1" bind:this={previewDialog} onkeydown={onPreviewKeydown}>
       <div class="preview-bar">
-        <span>Preview - not locked yet. The editor now matches this date order.</span>
+        <span>Preview - not locked yet. Each section is sorted by date, then description, and the editor now matches this order.</span>
         <button class="secondary-button" bind:this={previewClose} onclick={closePreview}>Close preview</button>
       </div>
       <div class="preview-body"><ExpenseView snap={previewSnapshot} /></div>
@@ -564,7 +564,7 @@
         <p class="confirm-line"><span>{EXPENSE_CATEGORY_LABELS[category]}</span><span class="tnum">{formatDollars(expenseSubtotalFor(subtotals, category))}</span></p>
       {/each}
       <p class="confirm-total">Total {formatDollars(totalCents)}</p>
-      <p class="muted">Each section will be sorted by date and the report locked. It cannot be edited after this.</p>
+      <p class="muted">Each section will be sorted by date, then description, and the report locked. It cannot be edited after this.</p>
       {#if finalizeError}<p class="error">Couldn't save: {finalizeError}</p>{/if}
     </ConfirmDialog>
   {/if}

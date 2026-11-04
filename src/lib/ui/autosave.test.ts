@@ -439,6 +439,33 @@ describe('flushPendingAutosave', () => {
 
     expect(flushed).toBe(false);
   });
+
+  test('rejects with the save error, keeping the retry, so a draft switch or discard is refused', async () => {
+    vi.useFakeTimers();
+    let savedJson = '';
+    let failing = true;
+    const autosave = createAutosaveController({
+      read: () => 'open draft edits',
+      serialize: (v) => v,
+      isSaved: (json) => json === savedJson,
+      markSaved: (json) => { savedJson = json; },
+      save: async () => {
+        if (failing) throw new Error('disk is full');
+      },
+      setState: () => {},
+      retryDelayMs: 100,
+    });
+
+    await expect(flushPendingAutosave(autosave, true)).rejects.toThrow('disk is full');
+    expect(autosave.hasUnsavedChanges()).toBe(true);
+
+    failing = false;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(savedJson).toBe('open draft edits');
+    expect(autosave.hasUnsavedChanges()).toBe(false);
+    autosave.dispose();
+    vi.useRealTimers();
+  });
 });
 
 describe('settleAutosaveBeforeManualSave', () => {

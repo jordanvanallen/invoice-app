@@ -27,6 +27,9 @@ describe('expense report editor route', () => {
     expect(page).toContain('SaveStatusChip');
     expect(page).toContain('createAutosaveController');
     expect(page).toContain('Sort rows by date');
+    expect(page).toContain('Sort rows by date, then description');
+    expect(page).toContain('Each section will be sorted by date, then description, and the report locked.');
+    expect(page).toContain('Each section is sorted by date, then description, and the editor now matches this order.');
     expect(page).toContain('onclick={sortExpenseRows}');
     expect(page).toContain('prepareExpensePreview');
     expect(page).toContain('ExpenseView');

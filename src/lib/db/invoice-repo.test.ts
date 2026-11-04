@@ -2,7 +2,7 @@ import { test, expect, describe } from 'vitest';
 import { createSqlJsDb } from './sqljs-adapter';
 import { runMigrations } from './migrate';
 import { addEntry, deleteEntryIfUnused, listEntries, renameEntry, setActive } from './catalog-repo';
-import { createDraft, loadDraft, saveDraft, saveDraftInDateOrder, finalizeInvoice, reprintSnapshot, listYears, listFinalizedInvoices, listInvoicesForYear, yearRollup, latestDraftId, duplicateInvoice, yearClientBreakdown, rangeRollup, rangeClientBreakdown, peekNextSeq, voidInvoice, listVoided, unvoidInvoice, searchInvoices, loadBilledHistory, getInvoiceStatus, deleteVoidedInvoice } from './invoice-repo';
+import { createDraft, getOrCreateLatestDraft, loadDraft, saveDraft, saveDraftInDateOrder, finalizeInvoice, reprintSnapshot, listYears, listFinalizedInvoices, listInvoicesForYear, yearRollup, latestDraftId, listDrafts, deleteDraft, duplicateInvoice, yearClientBreakdown, rangeRollup, rangeClientBreakdown, peekNextSeq, voidInvoice, listVoided, unvoidInvoice, searchInvoices, loadBilledHistory, getInvoiceStatus, deleteVoidedInvoice } from './invoice-repo';
 import { allocateSeq } from './numbering-repo';
 import { getSettings, saveSettings } from './settings-repo';
 import type { LineItem } from '../types';
@@ -80,6 +80,73 @@ describe('invoice draft repo', () => {
     });
 
     expect((await loadDraft(db, id)).lines).toHaveLength(1);
+  });
+
+  test('an omitted sequence preserves the last valid number while saving all other draft edits', async () => {
+    const db = await freshDb();
+    const id = await createDraft(db, {
+      year: 2026, issueDate: '2026-05-28',
+      periodStart: '2026-05-21', periodEnd: '2026-05-27',
+    });
+    await saveDraft(db, id, {
+      seq: 11,
+      year: 2026, issueDate: '2026-05-28',
+      periodStart: '2026-05-21', periodEnd: '2026-05-27',
+      lines: [line({ inspectionNumber: 'DATA-BEFORE' })],
+    });
+
+    await saveDraft(db, id, {
+      year: 2026, issueDate: '2026-05-29',
+      periodStart: '2026-05-22', periodEnd: '2026-05-28',
+      lines: [line({ inspectionNumber: 'DATA-SURVIVES' })],
+    });
+
+    expect(await loadDraft(db, id)).toEqual(expect.objectContaining({
+      seq: 11,
+      issueDate: '2026-05-29',
+      periodStart: '2026-05-22',
+      periodEnd: '2026-05-28',
+      lines: [expect.objectContaining({ inspectionNumber: 'DATA-SURVIVES' })],
+    }));
+  });
+
+  test('an omitted sequence clears an old-year number when the invoice moves into a conflicting year', async () => {
+    const db = await freshDb();
+    const occupied = await createDraft(db, {
+      year: 2027, issueDate: '2027-01-07',
+      periodStart: '2027-01-01', periodEnd: '2027-01-06',
+    });
+    await saveDraft(db, occupied, {
+      seq: 11,
+      year: 2027, issueDate: '2027-01-07',
+      periodStart: '2027-01-01', periodEnd: '2027-01-06',
+      lines: [line({ inspectionNumber: 'OCCUPIED', date: '2027-01-06' })],
+    });
+    await finalizeInvoice(db, occupied);
+
+    const moving = await createDraft(db, {
+      year: 2026, issueDate: '2026-12-31',
+      periodStart: '2026-12-25', periodEnd: '2026-12-30',
+    });
+    await saveDraft(db, moving, {
+      seq: 11,
+      year: 2026, issueDate: '2026-12-31',
+      periodStart: '2026-12-25', periodEnd: '2026-12-30',
+      lines: [line({ inspectionNumber: 'BEFORE-MOVE' })],
+    });
+
+    await saveDraft(db, moving, {
+      year: 2027, issueDate: '2027-01-08',
+      periodStart: '2027-01-01', periodEnd: '2027-01-07',
+      lines: [line({ inspectionNumber: 'SURVIVES-MOVE', date: '2027-01-07' })],
+    });
+
+    expect(await loadDraft(db, moving)).toEqual(expect.objectContaining({
+      seq: null,
+      year: 2027,
+      issueDate: '2027-01-08',
+      lines: [expect.objectContaining({ inspectionNumber: 'SURVIVES-MOVE' })],
+    }));
   });
 
   test.each(['finalized', 'void'] as const)(
@@ -594,7 +661,7 @@ describe('finalize + reprint', () => {
     }]);
   });
 
-  test('finalize stores a date-ordered snapshot that reprints identically', async () => {
+  test('finalize stores a date/inspection-number ordered snapshot that reprints identically', async () => {
     const db = await freshDb();
     const id = await createDraft(db, {
       year: 2026,
@@ -609,10 +676,11 @@ describe('finalize + reprint', () => {
       periodStart: '2026-07-01',
       periodEnd: '2026-07-14',
       lines: [
-        line({ inspectionNumber: 'completed-new', date: '2026-07-14', position: 0 }),
+        line({ inspectionNumber: 'completed-10', date: '2026-07-14', position: 0 }),
         line({ type: 'noshow', inspectionNumber: 'noshow-new', date: '2026-07-13', position: 1 }),
         line({ inspectionNumber: 'completed-old', date: '2026-07-01', position: 2 }),
         line({ type: 'noshow', inspectionNumber: 'noshow-old', date: '2026-07-02', position: 3 }),
+        line({ inspectionNumber: 'completed-2', date: '2026-07-14', position: 4 }),
       ],
     });
 
@@ -620,7 +688,7 @@ describe('finalize + reprint', () => {
     const reprinted = await reprintSnapshot(db, id);
 
     expect(finalized.lines.map((row) => row.inspectionNumber)).toEqual([
-      'completed-old', 'completed-new', 'noshow-old', 'noshow-new',
+      'completed-old', 'completed-2', 'completed-10', 'noshow-old', 'noshow-new',
     ]);
     expect(reprinted.lines).toEqual(finalized.lines);
   });
@@ -842,6 +910,38 @@ describe('by-year views', () => {
 });
 
 describe('latestDraftId', () => {
+  test('concurrent launch initialization creates only one blank draft', async () => {
+    const db = await freshDb();
+    const header = {
+      year: 2026, issueDate: '2026-05-28',
+      periodStart: '2026-05-21', periodEnd: '2026-05-27',
+    };
+
+    const ids = await Promise.all([
+      getOrCreateLatestDraft(db, header),
+      getOrCreateLatestDraft(db, header),
+    ]);
+
+    expect(ids[0]).toBe(ids[1]);
+    expect(await listDrafts(db)).toHaveLength(1);
+  });
+
+  test('launch initialization reopens an existing draft without adding another', async () => {
+    const db = await freshDb();
+    const existing = await createDraft(db, {
+      year: 2026, issueDate: '2026-05-28',
+      periodStart: '2026-05-21', periodEnd: '2026-05-27',
+    });
+
+    const opened = await getOrCreateLatestDraft(db, {
+      year: 2027, issueDate: '2027-01-07',
+      periodStart: '2027-01-01', periodEnd: '2027-01-07',
+    });
+
+    expect(opened).toBe(existing);
+    expect(await listDrafts(db)).toHaveLength(1);
+  });
+
   test('returns null when there are no drafts, then the newest draft id', async () => {
     const db = await freshDb();
     expect(await latestDraftId(db)).toBeNull();
@@ -856,6 +956,59 @@ describe('latestDraftId', () => {
     });
     await finalizeInvoice(db, b);
     expect(await latestDraftId(db)).toBe(a);
+  });
+
+  test('lists every recoverable draft instead of hiding older saved work', async () => {
+    const db = await freshDb();
+    const older = await createDraft(db, {
+      year: 2026, issueDate: '2026-05-28',
+      periodStart: '2026-05-21', periodEnd: '2026-05-27',
+    });
+    await saveDraft(db, older, {
+      seq: 7,
+      year: 2026, issueDate: '2026-05-28',
+      periodStart: '2026-05-21', periodEnd: '2026-05-27',
+      lines: [line({ inspectionNumber: 'RECOVER-ME' })],
+    });
+    const newer = await createDraft(db, {
+      year: 2026, issueDate: '2026-06-04',
+      periodStart: '2026-05-28', periodEnd: '2026-06-03',
+    });
+
+    expect(await latestDraftId(db)).toBe(newer);
+    expect(await listDrafts(db)).toEqual([
+      expect.objectContaining({ id: newer, seq: null, lineCount: 0 }),
+      expect.objectContaining({ id: older, seq: 7, lineCount: 1, draftRevision: 1 }),
+    ]);
+  });
+
+  test('deletes only an explicitly selected draft and leaves finalized invoices untouched', async () => {
+    const db = await freshDb();
+    const draftId = await createDraft(db, {
+      year: 2026, issueDate: '2026-05-28',
+      periodStart: '2026-05-21', periodEnd: '2026-05-27',
+    });
+    await saveDraft(db, draftId, {
+      year: 2026, issueDate: '2026-05-28',
+      periodStart: '2026-05-21', periodEnd: '2026-05-27',
+      lines: [line()],
+    });
+    const finalizedId = await createDraft(db, {
+      year: 2026, issueDate: '2026-06-04',
+      periodStart: '2026-05-28', periodEnd: '2026-06-03',
+    });
+    await saveDraft(db, finalizedId, {
+      year: 2026, issueDate: '2026-06-04',
+      periodStart: '2026-05-28', periodEnd: '2026-06-03',
+      lines: [line()],
+    });
+    await finalizeInvoice(db, finalizedId);
+
+    await deleteDraft(db, draftId);
+    expect(await listDrafts(db)).toEqual([]);
+    expect(await getInvoiceStatus(db, finalizedId)).toBe('finalized');
+    await expect(deleteDraft(db, finalizedId)).rejects.toThrow(/expected 1 row.*affected 0/i);
+    expect(await getInvoiceStatus(db, finalizedId)).toBe('finalized');
   });
 });
 
