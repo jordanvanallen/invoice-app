@@ -31,6 +31,7 @@ export const expenseSummaryInput: ExpenseSummaryInput = {
     itemId: 10,
     itemDate: '2026-06-30',
     position: 0,
+    category: 'general',
     description: 'Fuel',
     amountCents: 7_500,
   }],

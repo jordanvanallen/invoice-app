@@ -3,6 +3,8 @@ import { expensePdfBytes, expenseSummaryPdfBytes, invoicePdfBytes, summaryPdfByt
 import type { FinalizedSnapshot, LineItem } from '../types';
 import type { ExpenseSnapshot } from '../expense/types';
 import { expenseSummaryInput } from './expenseSummaryDoc.test';
+import { mileagePdfBytes } from './generate';
+import type { MileageSnapshot, MileageSnapshotTrip } from '../mileage/types';
 
 function line(over: Partial<LineItem> = {}): LineItem {
   return {
@@ -67,5 +69,44 @@ describe('invoicePdfBytes', () => {
 
     expect(bytes.length).toBeGreaterThan(1000);
     expect(String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3])).toBe('%PDF');
+  });
+});
+
+describe('mileagePdfBytes', () => {
+  const pdfText = (bytes: Uint8Array) => new TextDecoder('latin1').decode(bytes);
+  const pageCount = (bytes: Uint8Array) => Number(/\/Type \/Pages\s*\/Count (\d+)/.exec(pdfText(bytes))?.[1]);
+  const mileageTrip = (index: number): MileageSnapshotTrip => ({
+    position: index,
+    date: `2026-07-${String((index % 28) + 1).padStart(2, '0')}`,
+    from: `Origin ${index + 1}`,
+    to: `Destination ${index + 1}`,
+    purpose: `Inspection run ${index + 1} with a longer purpose that wraps inside its column`,
+    startOdometerKm: index * 100,
+    endOdometerKm: index * 100 + 42,
+    distanceKm: 42,
+  });
+  const mileage = (tripCount: number): MileageSnapshot => ({
+    reportNumber: '3-2026', seq: 3, year: 2026, reportDate: '2026-07-31',
+    periodStart: '2026-07-01', periodEnd: '2026-07-31', vehicle: 'Ford F-150 · ABC 123',
+    inspectorName: 'Jane Tester', inspectorAddress: '123 Test Street', inspectorNumber: '00000',
+    logoDataUrl: '',
+    trips: Array.from({ length: tripCount }, (_, index) => mileageTrip(index)),
+    totalKm: tripCount * 42,
+  });
+
+  test('mileage report generates a real one-page PDF for a single trip', async () => {
+    const bytes = await mileagePdfBytes(mileage(1));
+
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect(String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3])).toBe('%PDF');
+    expect(pageCount(bytes)).toBe(1);
+  });
+
+  test('mileage report with many trips paginates instead of truncating rows', async () => {
+    const bytes = await mileagePdfBytes(mileage(90));
+
+    expect(String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3])).toBe('%PDF');
+    expect(pageCount(bytes)).toBeGreaterThan(1);
+    expect(pdfText(bytes).trimEnd().endsWith('%%EOF')).toBe(true);
   });
 });

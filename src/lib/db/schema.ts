@@ -154,4 +154,41 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE invoices ADD COLUMN draft_revision INTEGER NOT NULL DEFAULT 0`,
     ],
   },
+  {
+    version: 7,
+    statements: [
+      `ALTER TABLE expense_items ADD COLUMN category TEXT NOT NULL DEFAULT 'general' CHECK (category IN ('vehicle','general'))`,
+      `CREATE TABLE mileage_year_counters (
+        year INTEGER PRIMARY KEY,
+        last_seq INTEGER NOT NULL CHECK (last_seq > 0)
+      )`,
+      `CREATE TABLE mileage_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        year INTEGER NOT NULL,
+        seq INTEGER CHECK (seq IS NULL OR seq > 0),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','finalized','void')),
+        report_date TEXT NOT NULL DEFAULT '',
+        period_start TEXT NOT NULL DEFAULT '',
+        period_end TEXT NOT NULL DEFAULT '',
+        vehicle TEXT NOT NULL DEFAULT '',
+        finalized_at TEXT,
+        total_km INTEGER NOT NULL DEFAULT 0 CHECK (total_km >= 0),
+        snapshot_json TEXT,
+        UNIQUE (year, seq)
+      )`,
+      `CREATE TABLE mileage_trips (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mileage_report_id INTEGER NOT NULL REFERENCES mileage_reports(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL DEFAULT 0,
+        date TEXT NOT NULL DEFAULT '',
+        from_place TEXT NOT NULL DEFAULT '',
+        to_place TEXT NOT NULL DEFAULT '',
+        purpose TEXT NOT NULL DEFAULT '',
+        start_odometer_km INTEGER CHECK (start_odometer_km IS NULL OR start_odometer_km >= 0),
+        end_odometer_km INTEGER CHECK (end_odometer_km IS NULL OR end_odometer_km >= 0)
+      )`,
+      `CREATE INDEX idx_mileage_reports_year_status ON mileage_reports(year, status, report_date)`,
+      `CREATE INDEX idx_mileage_trips_report ON mileage_trips(mileage_report_id, position)`,
+    ],
+  },
 ];

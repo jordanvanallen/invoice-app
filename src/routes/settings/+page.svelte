@@ -28,7 +28,7 @@
   function setSize(s: TextSize) { textSize = s; applyTextSize(s); markSaved(); }
 
   async function chooseInvoiceFolder() {
-    const picked = await open({ directory: true, title: 'Choose where to save invoice PDFs' });
+    const picked = await open({ directory: true, title: 'Choose where to save PDFs' });
     if (typeof picked === 'string') { setInvoiceFolder(picked); invoiceFolder = picked; markSaved(); }
   }
   function useDownloadsInvoice() { setInvoiceFolder(''); invoiceFolder = ''; markSaved(); }
@@ -174,9 +174,9 @@
     </section>
 
     <section>
-      <h2>Where invoices are saved</h2>
-      <p class="folder-now">Invoice PDFs save to: <b>{invoiceFolder || 'Downloads (default)'}</b></p>
-      <p class="seg-label">Each invoice is filed under a year subfolder (e.g. <b>2026-invoices</b>); tax summaries go in <b>tax-summaries</b>. Tip: point this at something like <b>~/Documents/MyCompany-invoices</b>.</p>
+      <h2>Where PDFs are saved</h2>
+      <p class="folder-now">PDFs save to: <b>{invoiceFolder || 'Downloads (default)'}</b></p>
+      <p class="seg-label">Invoices, expense reports, and mileage reports use year subfolders (e.g. <b>2026-invoices</b>, <b>2026-expenses</b>, and <b>2026-mileage</b>); summaries go in <b>tax-summaries</b> or <b>expense-summaries</b>. Tip: point this at something like <b>~/Documents/MyCompany-reports</b>.</p>
       <div class="seg">
         <button onclick={chooseInvoiceFolder}>Choose folder…</button>
         <button onclick={openInvoiceFolder}>Open this folder</button>

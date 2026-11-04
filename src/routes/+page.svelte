@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { onNavigate } from '$app/navigation';
   import InvoiceSection from '$lib/components/InvoiceSection.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import SaveStatusChip from '$lib/components/SaveStatusChip.svelte';
@@ -34,10 +33,10 @@
   } from '$lib/ui/invoiceSequence';
   import {
     createAutosaveController,
-    flushPendingAutosave,
     settleAutosaveBeforeManualSave,
     type AutosaveController,
   } from '$lib/ui/autosave';
+  import { guardDraftNavigation } from '$lib/ui/guardDraftNavigation';
   import { handleAutosavingWindowCloseRequest } from '$lib/ui/windowClose';
   import type { Settings, DraftInvoice, FinalizedSnapshot } from '$lib/types';
   import type { CatalogEntry } from '$lib/db/catalog-repo';
@@ -68,6 +67,8 @@
   let unlisten: (() => void) | null = null;
   let autosave: AutosaveController | null = null;
   let lastSavedJson = '';
+  let leaveMessage = $state('');
+  let leaving = $state(false);
 
   function invoiceYear(): number {
     return Number(issueDate.slice(0, 4)) || new Date().getFullYear();
@@ -111,6 +112,7 @@
       setState: (state) => { saveState = state; },
       onSaved: () => {
         savedAt = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        leaveMessage = '';
       },
     });
   }
@@ -165,10 +167,16 @@
     autosave?.dispose();
   });
 
-  onNavigate(() => flushPendingAutosave(
-    autosave,
-    loaded && invoiceId !== null && !finalized && canPersistInvoiceSequence(seqState),
-  ));
+  guardDraftNavigation({
+    autosave: () => autosave,
+    isEditing: () => loaded && invoiceId !== null && !finalized,
+    // Autosave pauses while the number is invalid, so leaving would drop those edits.
+    unsavableReason: () => canPersistInvoiceSequence(seqState)
+      ? ''
+      : "Your changes can't be saved until the invoice number is fixed, so you're still on this page.",
+    onBlocked: (message) => { leaveMessage = message; },
+    onLeaving: (value) => { leaving = value; },
+  });
 
   // Debounced autosave: persists 1.5s after a real change. Skips save-on-load and
   // no-op re-saves by comparing against the last persisted snapshot.
@@ -382,6 +390,7 @@
     </div>
   </div>
 {:else}
+  <div class="leave-lock" inert={leaving}>
   <div class="head">
     <h1>New Invoice</h1>
     <StatusPill status="draft" />
@@ -465,6 +474,7 @@
 
   {#if totals}
     <div class="dock">
+      {#if leaveMessage}<p class="leave-blocked" role="alert">{leaveMessage}</p>{/if}
       <div class="figs">
         <span class="fig"><span class="lbl">Completed</span> {completed.length} · <span class="lbl">No-shows</span> {noshow.length}</span>
         <span class="fig"><span class="lbl">Subtotal</span> <b class="tnum">{formatDollars(totals.subtotalCents)}</b></span>
@@ -512,9 +522,12 @@
       {#if finalizeError}<p class="err">Couldn't save: {finalizeError}</p>{/if}
     </ConfirmDialog>
   {/if}
+  </div>
 {/if}
 
 <style>
+  /* Inert while the next page loads after leaving; adds no box of its own. */
+  .leave-lock { display: contents; }
   .head { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); }
   .head .spacer { flex: 1; }
   .invoice-number { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 600; }
@@ -539,6 +552,7 @@
     display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); flex-wrap: wrap;
     padding: var(--sp-3) var(--sp-8); background: var(--bg-surface); border-top: 1px solid var(--border);
     box-shadow: 0 -4px 16px rgba(0,0,0,.08); }
+  .leave-blocked { flex: 1 0 100%; margin: 0; color: var(--red-600); font-weight: 600; }
   .figs { display: flex; align-items: center; gap: var(--sp-6); flex-wrap: wrap; }
   .fig { color: var(--text-secondary); font-size: var(--fs-sm); }
   .fig .lbl, .dock-total .lbl { color: var(--text-muted); }

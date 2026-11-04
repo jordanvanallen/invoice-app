@@ -169,6 +169,63 @@ describe('handleWindowCloseRequest', () => {
     expect(savedDraft).toBe('preview-sorted');
   });
 
+  test('keeps closing best-effort when the autosave flush reports a failed save', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const autosave = createAutosaveController({
+        read: () => 'unsaved draft',
+        serialize: (value) => value,
+        isSaved: () => false,
+        markSaved: () => {},
+        save: async () => { throw new Error('database is locked'); },
+        setState: () => {},
+        retryDelayMs: 60_000,
+      });
+      const destroy = vi.fn(async () => { autosave.dispose(); });
+
+      await expect(handleAutosavingWindowCloseRequest(closeEvent(), {
+        autosave,
+        canFlush: true,
+        destroy,
+      })).resolves.toBeUndefined();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  test('does not leak a rejection when a save fails after the close timeout', async () => {
+    vi.useFakeTimers();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      let failSave!: (error: Error) => void;
+      const destroy = vi.fn(async () => {});
+      const closing = handleWindowCloseRequest(closeEvent(), {
+        save: () => new Promise<void>((_, reject) => { failSave = reject; }),
+        destroy,
+        saveTimeoutMs: 100,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await closing;
+      failSave(new Error('late failure'));
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   test('shares the latest-draft flush between navigation and close', async () => {
     vi.useFakeTimers();
     let draft = 'before-preview';

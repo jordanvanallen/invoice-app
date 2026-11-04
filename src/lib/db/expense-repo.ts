@@ -1,10 +1,12 @@
 import type { Db, DbStatement } from './db';
 import { executeStatementsAtomically } from './db';
 import { getSettings } from './settings-repo';
-import { buildExpenseSnapshot } from '../expense/snapshot';
+import { isExpenseCategory } from '../expense/category';
+import { buildExpenseSnapshot, parseExpenseSnapshot } from '../expense/snapshot';
 import { orderExpenseItems } from '../expense/order';
 import { expenseFinalizeBlockers } from '../expense/validation';
 import type {
+  ExpenseCategory,
   ExpenseDraft,
   ExpenseItem,
   ExpenseListItem,
@@ -14,6 +16,7 @@ import type {
   ExpenseSummaryData,
   ExpenseSummaryItemRow,
   ExpenseSummaryReport,
+  SectionedExpenseSnapshot,
 } from '../expense/types';
 import type { ClosedDateRange } from '../history/history';
 
@@ -36,9 +39,18 @@ export async function createExpenseDraft(db: Db, header: ExpenseDraftHeader): Pr
 
 interface ExpenseItemRow {
   position: number;
+  category: string;
   date: string;
   description: string;
   amount_cents: number;
+}
+
+/** The schema CHECK makes this unreachable; fail loudly rather than let an editor autosave drop the row. */
+function storedExpenseCategory(reportId: number, value: string): ExpenseCategory {
+  if (!isExpenseCategory(value)) {
+    throw new Error(`Expense report ${reportId} has a row in an unknown section ("${value}").`);
+  }
+  return value;
 }
 
 export async function loadExpenseDraft(db: Db, reportId: number): Promise<ExpenseDraft> {
@@ -55,7 +67,7 @@ export async function loadExpenseDraft(db: Db, reportId: number): Promise<Expens
   );
   if (!head) throw new Error(`Expense report ${reportId} does not exist.`);
   const rows = await db.select<ExpenseItemRow>(
-    `SELECT position, date, description, amount_cents
+    `SELECT position, category, date, description, amount_cents
        FROM expense_items
       WHERE expense_report_id = ?
       ORDER BY position, id`,
@@ -69,6 +81,7 @@ export async function loadExpenseDraft(db: Db, reportId: number): Promise<Expens
     periodEnd: head.period_end,
     items: rows.map((row) => ({
       position: row.position,
+      category: storedExpenseCategory(reportId, row.category),
       date: row.date,
       description: row.description,
       amountCents: row.amount_cents,
@@ -110,9 +123,11 @@ function replaceExpenseItemStatements(
     { sql: 'DELETE FROM expense_items WHERE expense_report_id = ?', params: [reportId] },
     ...items.map((item) => ({
       sql: `INSERT INTO expense_items
-              (expense_report_id, position, date, description, amount_cents)
-            VALUES (?, ?, ?, ?, ?)`,
-      params: [reportId, item.position, item.date, item.description, item.amountCents],
+              (expense_report_id, position, category, date, description, amount_cents)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      params: [
+        reportId, item.position, item.category, item.date, item.description, item.amountCents,
+      ],
     })),
   ];
 }
@@ -138,6 +153,11 @@ export async function saveExpenseDraft(
   const year = deriveExpenseYear(draft.reportDate, draft.year);
   if (draft.seq !== null) {
     validateSelectedExpenseSeq(draft.seq, await takenExpenseSequences(db, year, reportId));
+  }
+  // Drafts may be incomplete, but every row must always belong to a section.
+  const unsectioned = draft.items.findIndex((item) => !isExpenseCategory(item.category));
+  if (unsectioned !== -1) {
+    throw new Error(`Expense row ${unsectioned + 1} is not in the Vehicle or General/Admin section.`);
   }
   await executeStatementsAtomically(db, [
     requireDraftStatement(reportId),
@@ -178,7 +198,10 @@ export async function peekNextExpenseSeq(
   return Math.max(used?.max_seq ?? 0, counter?.last_seq ?? 0) + 1;
 }
 
-export async function finalizeExpenseReport(db: Db, reportId: number): Promise<ExpenseSnapshot> {
+export async function finalizeExpenseReport(
+  db: Db,
+  reportId: number,
+): Promise<SectionedExpenseSnapshot> {
   const status = await getExpenseStatus(db, reportId);
   if (status !== 'draft') throw new Error(`Expense report ${reportId} is not a draft.`);
   const loaded = await loadExpenseDraft(db, reportId);
@@ -227,7 +250,7 @@ export async function reprintExpenseSnapshot(db: Db, reportId: number): Promise<
     [reportId],
   );
   if (!row?.snapshot_json) throw new Error(`Expense report ${reportId} is not finalized.`);
-  return JSON.parse(row.snapshot_json) as ExpenseSnapshot;
+  return parseExpenseSnapshot(row.snapshot_json);
 }
 
 function toExpenseListItem(row: {
@@ -334,6 +357,7 @@ interface ExpenseSummaryItemDbRow {
   item_id: number;
   item_date: string;
   position: number;
+  category: ExpenseCategory;
   description: string;
   amount_cents: number;
 }
@@ -369,6 +393,7 @@ export async function expenseSummaryForRange(
               ei.id AS item_id,
               ei.date AS item_date,
               ei.position,
+              ei.category,
               ei.description,
               ei.amount_cents
          FROM expense_reports er
@@ -387,6 +412,7 @@ export async function expenseSummaryForRange(
     itemId: row.item_id,
     itemDate: row.item_date,
     position: row.position,
+    category: row.category,
     description: row.description,
     amountCents: row.amount_cents,
   }));

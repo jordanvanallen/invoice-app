@@ -2,9 +2,15 @@ export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 export interface AutosaveController {
   notifyChanged(): void;
+  /**
+   * Saves the visible draft now. Rejects with the save error when that write fails;
+   * the background retry stays scheduled either way.
+   */
   flush(): Promise<void>;
   cancelPending(): void;
   dispose(): void;
+  /** True while the visible draft differs from the last one saved. */
+  hasUnsavedChanges(): boolean;
 }
 
 export function flushPendingAutosave(
@@ -15,6 +21,7 @@ export function flushPendingAutosave(
   return autosave.flush();
 }
 
+/** Rejects, leaving the retry running, when the flush fails, so a manual save never goes ahead. */
 export async function settleAutosaveBeforeManualSave(
   autosave: AutosaveController | null,
   canFlush: boolean,
@@ -22,6 +29,14 @@ export async function settleAutosaveBeforeManualSave(
   await flushPendingAutosave(autosave, canFlush);
   autosave?.cancelPending();
 }
+
+type RunOutcome =
+  | { status: 'saved' }
+  | { status: 'stale' }
+  | { status: 'failed'; error: unknown };
+
+const SAVED: RunOutcome = { status: 'saved' };
+const STALE: RunOutcome = { status: 'stale' };
 
 interface AutosaveOptions<T> {
   read: () => T;
@@ -62,33 +77,36 @@ export function createAutosaveController<T>({
     }
   }
 
-  async function run(token: number) {
-    if (disposed || token !== generation) return;
+  async function run(token: number): Promise<RunOutcome> {
+    if (disposed || token !== generation) return STALE;
     setState('saving');
     const value = read();
     const json = serialize(value);
     if (isSaved(json)) {
       setState('saved');
       onSaved?.();
-      return;
+      return SAVED;
     }
 
     try {
       await save(value);
-      if (disposed || token !== generation) return;
+      if (disposed || token !== generation) return STALE;
       markSaved(json);
       setState('saved');
       onSaved?.();
-    } catch {
-      if (disposed || token !== generation) return;
+      return SAVED;
+    } catch (error) {
+      // A newer edit or cancel already replaced this attempt; its own save decides.
+      if (disposed || token !== generation) return STALE;
       setState('error');
       schedule(retryDelayMs, false);
+      return { status: 'failed', error };
     }
   }
 
-  function enqueueRun(token: number): Promise<void> {
+  function enqueueRun(token: number): Promise<RunOutcome> {
     const next = saveQueue.then(() => run(token), () => run(token));
-    saveQueue = next.catch(() => {});
+    saveQueue = next.then(() => {}, () => {});
     return next;
   }
 
@@ -121,7 +139,9 @@ export function createAutosaveController<T>({
           const observedFlushRequestVersion = flushRequestVersion;
           clearTimer();
           const token = ++generation;
-          await enqueueRun(token);
+          const outcome = await enqueueRun(token);
+          // The retry is already scheduled; the caller still needs to know this write failed.
+          if (outcome.status === 'failed') throw outcome.error;
           if (
             observedChangeVersion === changeVersion
             && observedFlushRequestVersion === flushRequestVersion
@@ -144,6 +164,9 @@ export function createAutosaveController<T>({
       disposed = true;
       clearTimer();
       generation += 1;
+    },
+    hasUnsavedChanges() {
+      return !isSaved(serialize(read()));
     },
   };
 }

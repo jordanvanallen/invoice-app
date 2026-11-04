@@ -96,6 +96,103 @@ mod tests {
     use serde_json::json;
     use sqlx::{Row, SqlitePool};
 
+    /// The app's migrations, embedded at compile time from their TypeScript
+    /// source of truth so native-SQLite tests run exactly the statements that ship.
+    const SCHEMA_TS: &str = include_str!("../../src/lib/db/schema.ts");
+
+    /// Every shipped migration as `(version, statements)`, in version order.
+    ///
+    /// Panics, failing the calling test, if `schema.ts` no longer has the shape
+    /// this reader relies on: `version: N,` followed by plain backtick SQL strings.
+    fn shipped_migrations() -> Vec<(i64, Vec<String>)> {
+        let (_, list) = SCHEMA_TS
+            .split_once("export const MIGRATIONS")
+            .expect("schema.ts exports MIGRATIONS");
+        let migrations: Vec<(i64, Vec<String>)> = list
+            .split("version: ")
+            .skip(1)
+            .map(|entry| {
+                let (version, body) = entry
+                    .split_once(',')
+                    .expect("a migration version is followed by a comma");
+                assert_eq!(body.matches('`').count() % 2, 0, "unbalanced SQL literal");
+                let statements: Vec<String> = body
+                    .split('`')
+                    .skip(1)
+                    .step_by(2)
+                    .map(str::to_owned)
+                    .collect();
+                assert!(
+                    statements
+                        .iter()
+                        .all(|sql| !sql.contains("${") && !sql.contains('\\')),
+                    "migration SQL must be plain template literals"
+                );
+                let version = version.trim().parse().expect("numeric migration version");
+                (version, statements)
+            })
+            .collect();
+        let versions: Vec<i64> = migrations.iter().map(|(version, _)| *version).collect();
+        let expected: Vec<i64> = (1..=versions.len() as i64).collect();
+        assert_eq!(
+            versions, expected,
+            "migration versions are contiguous from 1"
+        );
+        migrations
+    }
+
+    /// One shipped migration exactly as production batches it: its statements,
+    /// then the `user_version` stamp, all in a single transaction.
+    fn shipped_migration_batch(version: i64) -> Vec<SqlStatement> {
+        let (_, statements) = shipped_migrations()
+            .into_iter()
+            .find(|(candidate, _)| *candidate == version)
+            .expect("the requested migration ships");
+        statements
+            .into_iter()
+            .chain([format!("PRAGMA user_version = {version}")])
+            .map(|sql| SqlStatement {
+                sql,
+                params: vec![],
+                expected_rows_affected: None,
+            })
+            .collect()
+    }
+
+    /// A native database upgraded through shipped migrations 1-6, holding a
+    /// finalized invoice and finalized/draft expense reports.
+    async fn create_populated_v6_database(pool: &SqlitePool) {
+        for version in 1..=6 {
+            execute_statements(pool, shipped_migration_batch(version))
+                .await
+                .unwrap();
+        }
+        for sql in [
+            r#"INSERT INTO invoices (id, year, seq, status, total_cents, snapshot_json)
+               VALUES (1, 2026, 8, 'finalized', 4294, '{"invoiceNumber":"8-2026"}')"#,
+            r#"INSERT INTO expense_reports
+                 (id, year, seq, status, report_date, total_cents, snapshot_json)
+               VALUES (1, 2026, 1, 'finalized', '2026-07-01', 7099, '{"reportNumber":"1-2026"}'),
+                      (2, 2026, NULL, 'draft', '2026-07-03', 0, NULL)"#,
+            "INSERT INTO expense_items
+                 (id, expense_report_id, position, date, description, amount_cents)
+             VALUES (1, 1, 0, '2026-06-05', 'Fuel', 4500),
+                    (2, 1, 1, '2026-06-06', 'Printer paper', 2599)",
+        ] {
+            sqlx::query(sql).execute(pool).await.unwrap();
+        }
+    }
+
+    async fn expense_items(pool: &SqlitePool) -> Vec<(i64, i64, String, i64)> {
+        sqlx::query_as(
+            "SELECT id, expense_report_id, description, amount_cents
+               FROM expense_items ORDER BY id",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    }
+
     async fn create_v4_line_items(pool: &SqlitePool) {
         sqlx::query(
             "CREATE TABLE invoices (
@@ -511,5 +608,174 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(version, 5);
+    }
+
+    #[sqlx::test]
+    async fn migrates_a_populated_version_6_database_to_version_7(pool: SqlitePool) {
+        create_populated_v6_database(&pool).await;
+        let items_before = expense_items(&pool).await;
+
+        execute_statements(&pool, shipped_migration_batch(7))
+            .await
+            .unwrap();
+
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(version, 7);
+        assert_eq!(expense_items(&pool).await, items_before);
+        let categories: Vec<String> =
+            sqlx::query_scalar("SELECT category FROM expense_items ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(categories, ["general", "general"]);
+        let snapshots: Vec<(String, Option<String>)> =
+            sqlx::query_as("SELECT status, snapshot_json FROM expense_reports ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            snapshots,
+            [
+                (
+                    "finalized".into(),
+                    Some(r#"{"reportNumber":"1-2026"}"#.into())
+                ),
+                ("draft".into(), None),
+            ]
+        );
+        let invoice: (i64, i64, String) =
+            sqlx::query_as("SELECT seq, total_cents, snapshot_json FROM invoices WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(invoice, (8, 4294, r#"{"invoiceNumber":"8-2026"}"#.into()));
+
+        let category_column: (String, i64, String) = sqlx::query_as(
+            "SELECT type, \"notnull\", dflt_value FROM pragma_table_info('expense_items')
+              WHERE name = 'category'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(category_column, ("TEXT".into(), 1, "'general'".into()));
+        let trip_columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('mileage_trips') ORDER BY cid")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            trip_columns,
+            [
+                "id",
+                "mileage_report_id",
+                "position",
+                "date",
+                "from_place",
+                "to_place",
+                "purpose",
+                "start_odometer_km",
+                "end_odometer_km",
+            ]
+        );
+        let cascade: String = sqlx::query_scalar(
+            "SELECT on_delete FROM pragma_foreign_key_list('mileage_trips')
+              WHERE \"table\" = 'mileage_reports' AND \"from\" = 'mileage_report_id'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cascade, "CASCADE");
+
+        let mut connection = pool.acquire().await.unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+        for accepted in [
+            "INSERT INTO expense_items (expense_report_id, category) VALUES (2, 'vehicle')",
+            "INSERT INTO mileage_year_counters (year, last_seq) VALUES (2026, 1)",
+            "INSERT INTO mileage_reports (id, year, seq, status, vehicle, total_km)
+             VALUES (1, 2026, 1, 'finalized', 'Blue Civic', 120)",
+            "INSERT INTO mileage_reports (id, year) VALUES (2, 2026)",
+            "INSERT INTO mileage_reports (id, year) VALUES (3, 2026)",
+            "INSERT INTO mileage_trips (mileage_report_id) VALUES (2)",
+            "INSERT INTO mileage_trips (mileage_report_id, start_odometer_km, end_odometer_km)
+             VALUES (2, 0, 0)",
+            "INSERT INTO mileage_trips (mileage_report_id, start_odometer_km, end_odometer_km)
+             VALUES (2, 900, 850)",
+        ] {
+            sqlx::query(accepted)
+                .execute(&mut *connection)
+                .await
+                .unwrap_or_else(|error| panic!("{accepted}: {error}"));
+        }
+        for rejected in [
+            "INSERT INTO expense_items (expense_report_id, category) VALUES (2, 'fuel')",
+            "INSERT INTO expense_items (expense_report_id, category) VALUES (2, NULL)",
+            "INSERT INTO mileage_year_counters (year, last_seq) VALUES (2027, 0)",
+            "INSERT INTO mileage_reports (year, seq) VALUES (2026, 1)",
+            "INSERT INTO mileage_reports (year, seq) VALUES (2026, 0)",
+            "INSERT INTO mileage_reports (year, status) VALUES (2026, 'archived')",
+            "INSERT INTO mileage_reports (year, total_km) VALUES (2026, -1)",
+            "INSERT INTO mileage_trips (mileage_report_id, start_odometer_km) VALUES (2, -1)",
+            "INSERT INTO mileage_trips (mileage_report_id, end_odometer_km) VALUES (2, -1)",
+            "INSERT INTO mileage_trips (mileage_report_id) VALUES (999)",
+        ] {
+            let error = sqlx::query(rejected)
+                .execute(&mut *connection)
+                .await
+                .expect_err(rejected);
+            assert!(
+                error.to_string().to_lowercase().contains("constraint"),
+                "{rejected}: {error}"
+            );
+        }
+
+        sqlx::query("DELETE FROM mileage_reports WHERE id = 2")
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+        let remaining_trips: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mileage_trips")
+            .fetch_one(&mut *connection)
+            .await
+            .unwrap();
+        assert_eq!(remaining_trips, 0);
+    }
+
+    #[sqlx::test]
+    async fn rolls_back_the_version_7_migration_when_a_later_statement_fails(pool: SqlitePool) {
+        create_populated_v6_database(&pool).await;
+        let schema_query = "SELECT type, name, sql FROM sqlite_master ORDER BY type, name";
+        let schema_before: Vec<(String, String, Option<String>)> =
+            sqlx::query_as(schema_query).fetch_all(&pool).await.unwrap();
+        let items_before = expense_items(&pool).await;
+        let mut statements = shipped_migration_batch(7);
+        statements.push(SqlStatement {
+            sql: "INSERT INTO missing_table (id) VALUES (1)".into(),
+            params: vec![],
+            expected_rows_affected: None,
+        });
+
+        assert!(execute_statements(&pool, statements).await.is_err());
+
+        let schema_after: Vec<(String, String, Option<String>)> =
+            sqlx::query_as(schema_query).fetch_all(&pool).await.unwrap();
+        assert_eq!(schema_after, schema_before);
+        let category_column_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('expense_items') WHERE name = 'category'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(category_column_count, 0);
+        assert_eq!(expense_items(&pool).await, items_before);
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(version, 6);
     }
 }

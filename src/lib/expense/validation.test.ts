@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'vitest';
 import { expenseFinalizeBlockers, expenseTotal } from './validation';
-import type { ExpenseDraft, ExpenseItem } from './types';
+import type { ExpenseCategory, ExpenseDraft, ExpenseItem } from './types';
 
 const row = (over: Partial<ExpenseItem> = {}): ExpenseItem => ({
   position: 0,
+  category: 'general',
   date: '2026-07-01',
   description: 'Fuel',
   amountCents: 5_000,
@@ -38,8 +39,8 @@ describe('expense validation', () => {
       ],
     }))).toEqual([
       { field: 'date', itemIndex: 0, message: 'Date is outside the reporting period' },
-      { field: 'description', itemIndex: 0, message: 'Enter a description for expense 1.' },
-      { field: 'amountCents', itemIndex: 0, message: 'Enter an amount greater than $0.00 for expense 1.' },
+      { field: 'description', itemIndex: 0, message: 'Enter a description for General/Admin expense 1.' },
+      { field: 'amountCents', itemIndex: 0, message: 'Enter an amount greater than $0.00 for General/Admin expense 1.' },
       { field: 'date', itemIndex: 1, message: 'Date is outside the reporting period' },
     ]);
   });
@@ -63,10 +64,10 @@ describe('expense validation', () => {
     ]);
 
     expect(expenseFinalizeBlockers(draft({ items: [row({ date: '   ' })] }))).toEqual([
-      { field: 'date', itemIndex: 0, message: 'Choose a date for expense 1.' },
+      { field: 'date', itemIndex: 0, message: 'Choose a date for General/Admin expense 1.' },
     ]);
     expect(expenseFinalizeBlockers(draft({ items: [row({ date: '2026-02-30' })] }))).toEqual([
-      { field: 'date', itemIndex: 0, message: 'Choose a valid date for expense 1.' },
+      { field: 'date', itemIndex: 0, message: 'Choose a valid date for General/Admin expense 1.' },
     ]);
   });
 
@@ -81,9 +82,9 @@ describe('expense validation', () => {
       { field: 'sequence', itemIndex: null, message: 'Enter a positive expense report number.' },
       { field: 'reportDate', itemIndex: null, message: 'Choose a report date.' },
       { field: 'periodEnd', itemIndex: null, message: 'The reporting period end must be on or after its start.' },
-      { field: 'date', itemIndex: 0, message: 'Choose a date for expense 1.' },
-      { field: 'description', itemIndex: 0, message: 'Enter a description for expense 1.' },
-      { field: 'amountCents', itemIndex: 0, message: 'Enter an amount greater than $0.00 for expense 1.' },
+      { field: 'date', itemIndex: 0, message: 'Choose a date for General/Admin expense 1.' },
+      { field: 'description', itemIndex: 0, message: 'Enter a description for General/Admin expense 1.' },
+      { field: 'amountCents', itemIndex: 0, message: 'Enter an amount greater than $0.00 for General/Admin expense 1.' },
     ]);
   });
 
@@ -106,6 +107,38 @@ describe('expense validation', () => {
   test('requires at least one row', () => {
     expect(expenseFinalizeBlockers(draft({ items: [] }))).toEqual([
       { field: 'items', itemIndex: null, message: 'Add at least one expense.' },
+    ]);
+  });
+
+  test('accepts a report whose rows are all in one section, either one', () => {
+    for (const category of ['vehicle', 'general'] as const) {
+      expect(expenseFinalizeBlockers(draft({
+        items: [row({ category }), row({ position: 1, category })],
+      }))).toEqual([]);
+    }
+  });
+
+  test('numbers rows within their own section, matching the editor labels', () => {
+    expect(expenseFinalizeBlockers(draft({
+      items: [
+        row({ position: 0, category: 'vehicle' }),
+        row({ position: 1, category: 'vehicle', description: '' }),
+        row({ position: 2, category: 'general', amountCents: 0 }),
+      ],
+    }))).toEqual([
+      { field: 'description', itemIndex: 1, message: 'Enter a description for Vehicle expense 2.' },
+      { field: 'amountCents', itemIndex: 2, message: 'Enter an amount greater than $0.00 for General/Admin expense 1.' },
+    ]);
+  });
+
+  test('blocks finalization for a row outside both sections', () => {
+    expect(expenseFinalizeBlockers(draft({
+      items: [
+        row({ position: 0, category: 'vehicle' }),
+        row({ position: 1, category: 'fuel' as ExpenseCategory }),
+      ],
+    }))).toEqual([
+      { field: 'category', itemIndex: 1, message: 'Put expense 2 in the Vehicle or General/Admin section.' },
     ]);
   });
 });

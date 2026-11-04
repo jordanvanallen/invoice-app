@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
-  import { onNavigate } from '$app/navigation';
+  import { onDestroy, onMount, tick } from 'svelte';
   import BigButton from '$lib/components/BigButton.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import DatePicker from '$lib/components/DatePicker.svelte';
@@ -17,10 +16,20 @@
     saveExpenseDraft,
     takenExpenseSequences,
   } from '$lib/db/expense-repo';
-  import { sortExpenseItems } from '$lib/expense/order';
-  import { expenseFinalizeBlockers, expenseTotal } from '$lib/expense/validation';
-  import type { ExpenseDraft, ExpenseSnapshot } from '$lib/expense/types';
-  import { formatCents, formatDollars, parseDollars } from '$lib/money';
+  import {
+    EXPENSE_CATEGORIES,
+    EXPENSE_CATEGORY_LABELS,
+    EXPENSE_CATEGORY_ROW_NOUNS,
+    expenseSubtotalFor,
+    expenseSubtotals,
+  } from '$lib/expense/category';
+  import { expenseFinalizeBlockers } from '$lib/expense/validation';
+  import type {
+    ExpenseCategory,
+    ExpenseDraft,
+    SectionedExpenseSnapshot,
+  } from '$lib/expense/types';
+  import { formatCents, formatDollars } from '$lib/money';
   import { saveExpensePdf } from '$lib/pdf/generate';
   import { backupNow } from '$lib/stores/backup';
   import { loadSettings } from '$lib/stores/settings';
@@ -28,16 +37,33 @@
   import type { Settings } from '$lib/types';
   import {
     createAutosaveController,
-    flushPendingAutosave,
     settleAutosaveBeforeManualSave,
     type AutosaveController,
   } from '$lib/ui/autosave';
   import { defaultInvoicePeriod } from '$lib/ui/date';
+  import { guardDraftNavigation } from '$lib/ui/guardDraftNavigation';
   import {
+    appendExpenseEditorRow,
+    emptyExpenseEditorSections,
+    expenseAddButtonId,
+    expenseAmountCents,
     expenseBlockingRowCount,
-    expenseRowWarnings,
+    expenseDraftItems,
+    expenseEditorRowUids,
+    expenseEditorSections,
+    expenseRowFieldId,
+    expenseRowWarningsByUid,
+    expenseUndoButtonId,
     firstExpenseBlockerTarget,
+    moveExpenseEditorRow,
+    newExpenseEditorRow,
     prepareExpensePreview,
+    removeExpenseEditorRow,
+    restoreExpenseEditorRow,
+    sortExpenseEditorSections,
+    type ExpenseEditorRow,
+    type ExpenseEditorSections,
+    type RemovedExpenseRow,
   } from '$lib/ui/expenseEditor';
   import {
     expenseSeqForPersistence,
@@ -46,23 +72,18 @@
   } from '$lib/ui/expenseSequence';
   import { handleAutosavingWindowCloseRequest } from '$lib/ui/windowClose';
 
-  interface ExpenseEditorRow {
-    uid: string;
-    position: number;
-    date: string;
-    description: string;
-    amountText: string;
-  }
-
-  let uidCounter = 0;
-  const nextUid = () => `expense-${++uidCounter}`;
-  const toEditorRow = (item: ExpenseDraft['items'][number]): ExpenseEditorRow => ({
-    uid: nextUid(),
-    position: item.position,
-    date: item.date,
-    description: item.description,
-    amountText: item.amountCents > 0 ? formatCents(item.amountCents) : '',
-  });
+  const ADD_LABELS: Record<ExpenseCategory, string> = {
+    vehicle: 'Add a vehicle expense',
+    general: 'Add a general/admin expense',
+  };
+  const PLACEHOLDERS: Record<ExpenseCategory, string> = {
+    vehicle: 'Fuel, parking, car wash...',
+    general: 'Office supplies, phone, postage...',
+  };
+  const otherSection = (category: ExpenseCategory): ExpenseCategory =>
+    category === 'vehicle' ? 'general' : 'vehicle';
+  // Arrows point at the other section: General/Admin sits below Vehicle.
+  const MOVE_ARROWS: Record<ExpenseCategory, string> = { vehicle: '↓', general: '↑' };
 
   let loaded = $state(false);
   let settings = $state<Settings | null>(null);
@@ -71,8 +92,8 @@
   let periodStart = $state('');
   let periodEnd = $state('');
   let sequenceText = $state('');
-  let rows = $state<ExpenseEditorRow[]>([]);
-  let undo = $state<{ row: ExpenseEditorRow; index: number } | null>(null);
+  let sections = $state<ExpenseEditorSections>(emptyExpenseEditorSections());
+  let undo = $state<RemovedExpenseRow | null>(null);
   let undoTimer: ReturnType<typeof setTimeout> | null = null;
   let takenSequences = $state<number[]>([]);
   let takenSequencesYear = $state<number | null>(null);
@@ -80,15 +101,12 @@
   let savedAt = $state('');
   let lastSavedJson = '';
   let autosave: AutosaveController | null = null;
+  let leaveMessage = $state('');
+  let leaving = $state(false);
   let unlisten: (() => void) | null = null;
 
   function reportYear(): number {
     return Number(reportDate.slice(0, 4)) || new Date().getFullYear();
-  }
-
-  function amountCents(text: string): number {
-    if (!text.trim()) return 0;
-    try { return parseDollars(text); } catch { return 0; }
   }
 
   function buildDraft(): ExpenseDraft {
@@ -98,50 +116,70 @@
       reportDate,
       periodStart,
       periodEnd,
-      items: rows.map((row, position) => ({
-        position,
-        date: row.date,
-        description: row.description,
-        amountCents: amountCents(row.amountText),
-      })),
+      items: expenseDraftItems(sections),
     };
   }
 
-  function blankRow(date = reportDate): ExpenseEditorRow {
-    return { uid: nextUid(), position: rows.length, date, description: '', amountText: '' };
+  async function focusAfterRender(id: string) {
+    await tick();
+    const element = document.getElementById(id);
+    element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    element?.focus();
   }
 
-  function addExpense() {
-    rows = [...rows, blankRow()];
+  function addExpense(category: ExpenseCategory) {
+    const row = newExpenseEditorRow(reportDate);
+    sections = appendExpenseEditorRow(sections, category, row);
+    void focusAfterRender(expenseRowFieldId(row.uid, 'date'));
   }
 
-  function removeExpense(uid: string) {
-    const index = rows.findIndex((row) => row.uid === uid);
-    if (index === -1) return;
-    undo = { row: rows[index], index };
-    rows = rows.filter((row) => row.uid !== uid)
-      .map((row, position) => ({ ...row, position }));
-    if (undoTimer) clearTimeout(undoTimer);
-    undoTimer = setTimeout(() => (undo = null), 8000);
+  function moveExpense(uid: string, target: ExpenseCategory) {
+    sections = moveExpenseEditorRow(sections, uid, target);
+    // Focus follows the row, so keyboard users stay on it in its new section.
+    void focusAfterRender(expenseRowFieldId(uid, 'move'));
   }
 
-  function undoDelete() {
-    if (!undo) return;
-    const next = [...rows];
-    next.splice(undo.index, 0, undo.row);
-    rows = next.map((row, position) => ({ ...row, position }));
+  function clearUndo() {
     undo = null;
     if (undoTimer) clearTimeout(undoTimer);
     undoTimer = null;
   }
 
+  function removeExpense(uid: string) {
+    const result = removeExpenseEditorRow(sections, uid);
+    if (!result) return;
+    sections = result.sections;
+    undo = result.removed;
+    if (undoTimer) clearTimeout(undoTimer);
+    undoTimer = setTimeout(expireUndo, 8000);
+    void focusAfterRender(expenseUndoButtonId(result.removed.category));
+  }
+
+  function expireUndo() {
+    // Keep keyboard users on the page when the Undo button they're on disappears.
+    const undoButton = undo ? expenseUndoButtonId(undo.category) : '';
+    const addButton = undo ? expenseAddButtonId(undo.category) : '';
+    const hadFocus = undoButton !== '' && document.activeElement?.id === undoButton;
+    undo = null;
+    undoTimer = null;
+    if (hadFocus) void focusAfterRender(addButton);
+  }
+
+  function undoDelete() {
+    if (!undo) return;
+    const restored = undo.row.uid;
+    sections = restoreExpenseEditorRow(sections, undo);
+    clearUndo();
+    void focusAfterRender(expenseRowFieldId(restored, 'date'));
+  }
+
   function normalizeAmount(row: ExpenseEditorRow) {
-    const cents = amountCents(row.amountText);
+    const cents = expenseAmountCents(row.amountText);
     if (cents > 0) row.amountText = formatCents(cents);
   }
 
   function sortExpenseRows() {
-    rows = sortExpenseItems(rows).map((row, position) => ({ ...row, position }));
+    sections = sortExpenseEditorSections(sections);
   }
 
   function makeAutosave() {
@@ -158,6 +196,7 @@
       setState: (state) => { saveState = state; },
       onSaved: () => {
         savedAt = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        leaveMessage = '';
       },
     });
   }
@@ -181,8 +220,7 @@
     periodStart = draft.periodStart;
     periodEnd = draft.periodEnd;
     sequenceText = draft.seq === null ? '' : String(draft.seq);
-    rows = draft.items.map(toEditorRow);
-    if (rows.length === 0) rows = [blankRow(reportDate)];
+    sections = expenseEditorSections(draft.items);
     lastSavedJson = JSON.stringify(buildDraft());
     makeAutosave();
     loaded = true;
@@ -210,7 +248,12 @@
     if (undoTimer) clearTimeout(undoTimer);
   });
 
-  onNavigate(() => flushPendingAutosave(autosave, loaded && reportId !== null && !finalized));
+  guardDraftNavigation({
+    autosave: () => autosave,
+    isEditing: () => loaded && reportId !== null && !finalized,
+    onBlocked: (message) => { leaveMessage = message; },
+    onLeaving: (value) => { leaving = value; },
+  });
 
   $effect(() => {
     if (!loaded || reportId === null || finalized) return;
@@ -246,25 +289,60 @@
   });
 
   const draftForDisplay = $derived(buildDraft());
-  const totalCents = $derived(expenseTotal(draftForDisplay.items));
+  const rowUids = $derived(expenseEditorRowUids(sections));
+  const subtotals = $derived(expenseSubtotals(draftForDisplay.items));
+  const totalCents = $derived(subtotals.totalCents);
   const blockers = $derived(expenseFinalizeBlockers(draftForDisplay));
+  const rowWarningsByUid = $derived(expenseRowWarningsByUid(blockers, rowUids));
   const blockingRowCount = $derived(expenseBlockingRowCount(blockers));
   const canFinalize = $derived(blockers.length === 0 && sequenceState.status === 'ready');
-  const showExpenseHint = $derived(
-    rows.every((row) => !row.description.trim() && !row.amountText.trim()),
-  );
+  const canSort = $derived(EXPENSE_CATEGORIES.some((category) => sections[category].length > 1));
+  const showExpenseHint = $derived(EXPENSE_CATEGORIES.every((category) =>
+    sections[category].every((row) => !row.description.trim() && !row.amountText.trim())));
 
   let showPreview = $state(false);
-  let previewSnapshot = $state<ExpenseSnapshot | null>(null);
-  function openPreview() {
+  let previewSnapshot = $state<SectionedExpenseSnapshot | null>(null);
+  let previewDialog = $state<HTMLDivElement>();
+  let previewClose = $state<HTMLButtonElement>();
+  let previewTrigger: HTMLElement | null = null;
+
+  async function openPreview() {
     if (!settings || sequenceState.status !== 'ready' || sequenceState.draftSeq === null) return;
     sortExpenseRows();
     previewSnapshot = prepareExpensePreview(buildDraft(), settings, sequenceState.draftSeq);
+    previewTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     showPreview = true;
+    await tick();
+    previewClose?.focus();
+  }
+
+  function closePreview() {
+    showPreview = false;
+    previewTrigger?.focus();
+  }
+
+  function onPreviewKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closePreview();
+      return;
+    }
+    if (event.key !== 'Tab' || !previewDialog) return;
+    const focusable = [...previewDialog.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')];
+    if (focusable.length === 0) return;
+    // Wrap at either end, and pull focus back in if it sits on the dialog itself.
+    const index = focusable.indexOf(document.activeElement as HTMLElement);
+    if (event.shiftKey && index <= 0) {
+      event.preventDefault();
+      focusable[focusable.length - 1].focus();
+    } else if (!event.shiftKey && (index === -1 || index === focusable.length - 1)) {
+      event.preventDefault();
+      focusable[0].focus();
+    }
   }
 
   function jumpToFirstBlocker() {
-    const target = firstExpenseBlockerTarget(buildDraft());
+    const target = firstExpenseBlockerTarget(buildDraft(), expenseEditorRowUids(sections));
     if (!target) return;
     const element = document.getElementById(target.id);
     element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -273,7 +351,7 @@
   }
 
   let showConfirm = $state(false);
-  let finalized = $state<ExpenseSnapshot | null>(null);
+  let finalized = $state<SectionedExpenseSnapshot | null>(null);
   let finalizeSaving = $state(false);
   let finalizeError = $state('');
 
@@ -316,10 +394,8 @@
     sequenceText = '';
     takenSequences = [];
     takenSequencesYear = null;
-    rows = [blankRow(defaults.issueDate)];
-    undo = null;
-    if (undoTimer) clearTimeout(undoTimer);
-    undoTimer = null;
+    sections = emptyExpenseEditorSections();
+    clearUndo();
     finalized = null;
     finalizeError = '';
     saveState = 'idle';
@@ -328,6 +404,59 @@
   }
 </script>
 
+{#snippet expenseSection(category: ExpenseCategory)}
+  {@const label = EXPENSE_CATEGORY_LABELS[category]}
+  {@const target = otherSection(category)}
+  <section class="card expenses {category}" aria-labelledby="expense-section-{category}-title">
+    <header class="section-head">
+      <h2 id="expense-section-{category}-title">{label}</h2>
+      <span class="meta tnum">{sections[category].length} {sections[category].length === 1 ? 'row' : 'rows'} · {formatDollars(expenseSubtotalFor(subtotals, category))}</span>
+    </header>
+    {#if sections[category].length === 0}
+      <p class="section-empty">No {label.toLowerCase()} yet.</p>
+    {:else}
+      <div class="row row-head" aria-hidden="true"><span>Date</span><span>Description</span><span>Amount</span><span></span></div>
+    {/if}
+    {#each sections[category] as row, index (row.uid)}
+      {@const rowLabel = `${EXPENSE_CATEGORY_ROW_NOUNS[category]} ${index + 1}`}
+      {@const rowWarnings = rowWarningsByUid.get(row.uid) ?? []}
+      <div class="row" id={row.uid}>
+        <label><span class="mobile-label">Date</span>
+          <DatePicker bind:value={row.date} ariaLabel={`${rowLabel} date`}
+            fieldId={expenseRowFieldId(row.uid, 'date')} block />
+        </label>
+        <label><span class="mobile-label">Description</span>
+          <input id={expenseRowFieldId(row.uid, 'description')} bind:value={row.description}
+            aria-label={`${rowLabel} description`} placeholder={PLACEHOLDERS[category]} />
+        </label>
+        <label><span class="mobile-label">Amount</span>
+          <span class="money-input"><span>$</span><input id={expenseRowFieldId(row.uid, 'amount')}
+            class="tnum" inputmode="decimal" bind:value={row.amountText}
+            aria-label={`${rowLabel} amount`} placeholder="0.00" onblur={() => normalizeAmount(row)} /></span>
+        </label>
+        <div class="row-actions">
+          <button id={expenseRowFieldId(row.uid, 'move')} type="button" class="move"
+            title={`Move to ${EXPENSE_CATEGORY_LABELS[target]}`}
+            aria-label={`Move ${rowLabel} to ${EXPENSE_CATEGORY_LABELS[target]}`}
+            onclick={() => moveExpense(row.uid, target)}><span aria-hidden="true">{MOVE_ARROWS[category]}</span></button>
+          <button type="button" class="del" title="Remove this row"
+            onclick={() => removeExpense(row.uid)} aria-label={`Remove ${rowLabel}`}>✕</button>
+        </div>
+        {#if rowWarnings.length}
+          <div class="warns">
+            {#each rowWarnings as warning}<span>⚠ {warning}</span>{/each}
+          </div>
+        {/if}
+      </div>
+    {/each}
+    {#if undo?.category === category}
+      <div class="undo">Row removed. <button id={expenseUndoButtonId(category)} type="button" onclick={undoDelete}>Undo</button></div>
+    {/if}
+    <button id={expenseAddButtonId(category)} type="button" class="add"
+      onclick={() => addExpense(category)}>+ {ADD_LABELS[category]}</button>
+  </section>
+{/snippet}
+
 {#if !loaded || !settings}
   <p class="muted">Loading...</p>
 {:else if finalized}
@@ -335,6 +464,9 @@
     <div class="finalized-pill">FINALIZED · Expense report #{finalized.reportNumber}</div>
     <h1>Expense report #{finalized.reportNumber} saved</h1>
     <p class="done-total">Total <b class="tnum">{formatDollars(finalized.totalCents)}</b></p>
+    <p class="muted">
+      {#each EXPENSE_CATEGORIES as category, index (category)}{index ? ' · ' : ''}{EXPENSE_CATEGORY_LABELS[category]} <span class="tnum">{formatDollars(expenseSubtotalFor(finalized, category))}</span>{/each}
+    </p>
     <p class="muted">This report is locked and will always reprint exactly as saved.</p>
     {#if finalizeError}<p class="error">{finalizeError}</p>{/if}
     <div class="actions">
@@ -343,6 +475,7 @@
     </div>
   </section>
 {:else}
+  <div class="leave-lock" inert={leaving}>
   <div class="editor">
   <div class="head">
     <h1>New Expense Report</h1>
@@ -374,47 +507,27 @@
   </div>
 
   {#if showExpenseHint}
-    <p class="empty-hint">Add your expenses below. Rows stay where you put them until you sort, preview, or finish.</p>
+    <p class="empty-hint">Add each expense to the Vehicle or General/Admin section below. Rows stay where you put them until you sort, preview, or finish.</p>
   {/if}
 
   <div class="row-tools">
-    <button type="button" class="secondary-button" disabled={rows.length < 2} onclick={sortExpenseRows}>Sort rows by date</button>
+    <button type="button" class="secondary-button" disabled={!canSort} onclick={sortExpenseRows}>Sort rows by date</button>
   </div>
 
-  <section class="card expenses" aria-label="Expense rows">
-    <div class="row row-head" aria-hidden="true"><span>Date</span><span>Description</span><span>Amount</span><span></span></div>
-    {#each rows as row, index (row.uid)}
-      {@const rowWarnings = expenseRowWarnings(blockers, index)}
-      <div class="row" id="expense-row-{index}">
-        <label><span class="mobile-label">Date</span>
-          <span id="expense-row-{index}-date"><DatePicker bind:value={row.date} ariaLabel={`Expense ${index + 1} date`} block /></span>
-        </label>
-        <label><span class="mobile-label">Description</span>
-          <input id="expense-row-{index}-description" bind:value={row.description}
-            aria-label={`Expense ${index + 1} description`} placeholder="Fuel, parking, meals..." />
-        </label>
-        <label><span class="mobile-label">Amount</span>
-          <span class="money-input"><span>$</span><input id="expense-row-{index}-amount"
-            class="tnum" inputmode="decimal" bind:value={row.amountText}
-            aria-label={`Expense ${index + 1} amount`} placeholder="0.00" onblur={() => normalizeAmount(row)} /></span>
-        </label>
-        <button type="button" class="del" title="Remove this row"
-          onclick={() => removeExpense(row.uid)} aria-label={`Remove expense ${index + 1}`}>✕</button>
-        {#if rowWarnings.length}
-          <div class="warns">
-            {#each rowWarnings as warning}<span>⚠ {warning}</span>{/each}
-          </div>
-        {/if}
-      </div>
+  <div class="sections">
+    {#each EXPENSE_CATEGORIES as category (category)}
+      {@render expenseSection(category)}
     {/each}
-    {#if undo}
-      <div class="undo">Row removed. <button type="button" onclick={undoDelete}>Undo</button></div>
-    {/if}
-    <button id="expense-add-row" type="button" class="add" onclick={addExpense}>+ Add an expense</button>
-  </section>
+  </div>
 
   <div class="dock">
-    <div class="total"><span>Total</span><b class="tnum">{formatDollars(totalCents)}</b></div>
+    {#if leaveMessage}<p class="leave-blocked" role="alert">{leaveMessage}</p>{/if}
+    <div class="figs">
+      {#each EXPENSE_CATEGORIES as category (category)}
+        <span class="fig"><span class="lbl">{EXPENSE_CATEGORY_LABELS[category]}</span> <b class="tnum">{formatDollars(expenseSubtotalFor(subtotals, category))}</b></span>
+      {/each}
+      <div class="total"><span>Total</span><b class="tnum">{formatDollars(totalCents)}</b></div>
+    </div>
     <div class="actions">
       {#if blockers.length > 0}
         {#if blockers[0].itemIndex !== null}
@@ -424,7 +537,7 @@
         {/if}
       {/if}
       <BigButton variant="secondary" onclick={openPreview}
-        disabled={rows.length === 0 || sequenceState.status !== 'ready'}>Preview</BigButton>
+        disabled={rowUids.length === 0 || sequenceState.status !== 'ready'}>Preview</BigButton>
       <BigButton onclick={() => (showConfirm = true)} disabled={!canFinalize}>Lock &amp; Save</BigButton>
     </div>
   </div>
@@ -432,10 +545,11 @@
   </div>
 
   {#if showPreview && previewSnapshot}
-    <div class="preview-overlay" role="dialog" aria-label="Expense report preview" aria-modal="true">
+    <div class="preview-overlay" role="dialog" aria-label="Expense report preview" aria-modal="true"
+      tabindex="-1" bind:this={previewDialog} onkeydown={onPreviewKeydown}>
       <div class="preview-bar">
         <span>Preview - not locked yet. The editor now matches this date order.</span>
-        <button class="secondary-button" onclick={() => (showPreview = false)}>Close preview</button>
+        <button class="secondary-button" bind:this={previewClose} onclick={closePreview}>Close preview</button>
       </div>
       <div class="preview-body"><ExpenseView snap={previewSnapshot} /></div>
     </div>
@@ -445,18 +559,23 @@
     <ConfirmDialog title="Lock &amp; Save this expense report?"
       confirmLabel={finalizeSaving ? 'Saving...' : 'Finalize & Save'}
       confirmDisabled={finalizeSaving} onConfirm={doFinalize} onCancel={() => (showConfirm = false)}>
-      <p>{rows.length} {rows.length === 1 ? 'expense' : 'expenses'}</p>
+      <p>{rowUids.length} {rowUids.length === 1 ? 'expense' : 'expenses'}</p>
+      {#each EXPENSE_CATEGORIES as category (category)}
+        <p class="confirm-line"><span>{EXPENSE_CATEGORY_LABELS[category]}</span><span class="tnum">{formatDollars(expenseSubtotalFor(subtotals, category))}</span></p>
+      {/each}
       <p class="confirm-total">Total {formatDollars(totalCents)}</p>
-      <p class="muted">The report will be sorted by date and locked. It cannot be edited after this.</p>
+      <p class="muted">Each section will be sorted by date and the report locked. It cannot be edited after this.</p>
       {#if finalizeError}<p class="error">Couldn't save: {finalizeError}</p>{/if}
     </ConfirmDialog>
   {/if}
-
+  </div>
 {/if}
 
 <style>
   h1 { margin: 0; font-size: var(--fs-xl); }
   .muted { margin: 0; color: var(--text-secondary); }
+  /* Inert while the next page loads after leaving; adds no box of its own. */
+  .leave-lock { display: contents; }
   .editor { container-type: inline-size; }
   .head { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); }
   .head .spacer { flex: 1; }
@@ -477,13 +596,23 @@
   .secondary-button { min-height: var(--target); padding: 0 var(--sp-4); border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); font-weight: 600; cursor: pointer; }
   .secondary-button:hover:not(:disabled) { background: var(--accent-tint); }
   .secondary-button:disabled { opacity: .55; cursor: default; }
-  .expenses { container-type: inline-size; overflow: hidden; margin-bottom: 96px; }
-  .row { display: grid; grid-template-columns: calc(220px * var(--fs-scale)) minmax(220px, 1fr) 170px 44px; gap: var(--sp-3); align-items: end; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
+  .sections { display: flex; flex-direction: column; gap: var(--sp-6); margin-bottom: 96px; }
+  .expenses { container-type: inline-size; overflow: hidden; }
+  .section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
+  .vehicle .section-head { background: var(--accent-tint); }
+  .general .section-head { background: var(--bg-sunken); }
+  h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+  .section-head .meta { color: var(--text-secondary); font-weight: 600; }
+  .section-empty { margin: 0; padding: var(--sp-4); color: var(--text-muted); }
+  .row { display: grid; grid-template-columns: calc(220px * var(--fs-scale)) minmax(220px, 1fr) 170px calc(88px + var(--sp-2)); gap: var(--sp-3); align-items: end; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
   .row-head { color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 700; align-items: center; padding-top: var(--sp-2); padding-bottom: var(--sp-2); }
   .mobile-label { display: none; }
   .money-input { display: flex; align-items: center; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); padding-left: var(--sp-3); color: var(--text-secondary); }
   .money-input:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
   .money-input input { border: 0; outline: 0; }
+  .row-actions { display: flex; gap: var(--sp-2); }
+  .move { width: 44px; height: var(--input-h); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--accent-strong); font-size: var(--fs-lg); cursor: pointer; }
+  .move:hover { background: var(--accent-tint); border-color: var(--accent-strong); }
   .del { width: 44px; height: var(--input-h); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--text-muted); cursor: pointer; }
   .del:hover { color: var(--red-600); border-color: var(--red-600); }
   .add { width: 100%; min-height: 48px; border: none; border-top: 1px solid var(--border); background: var(--bg-surface); color: var(--accent-strong); font-size: var(--fs-base); font-weight: 600; cursor: pointer; }
@@ -493,25 +622,31 @@
   .warns { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--sp-3); padding-top: var(--sp-1); }
   .warns span { color: var(--amber-600); font-size: var(--fs-sm); }
   .dock { position: sticky; bottom: 0; margin: 0 calc(-1 * var(--sp-8)) calc(-1 * var(--sp-8)); display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); flex-wrap: wrap; padding: var(--sp-3) var(--sp-8); background: var(--bg-surface); border-top: 1px solid var(--border); box-shadow: 0 -4px 16px rgba(0,0,0,.08); }
+  .figs { display: flex; align-items: baseline; gap: var(--sp-3) var(--sp-6); flex-wrap: wrap; }
+  .fig { color: var(--text-secondary); font-size: var(--fs-sm); }
+  .fig b { color: var(--text-primary); font-size: var(--fs-base); }
   .total { display: flex; align-items: baseline; gap: var(--sp-3); font-size: var(--fs-xl); color: var(--accent-strong); }
+  .leave-blocked { flex: 1 0 100%; margin: 0; color: var(--red-600); font-weight: 600; }
   .actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
   .fix { max-width: 320px; border: 0; background: transparent; color: var(--amber-600); text-decoration: underline; cursor: pointer; text-align: right; }
   .error { color: var(--red-600); }
+  .confirm-line { display: flex; justify-content: space-between; gap: var(--sp-4); margin: 0; }
   .confirm-total { font-size: var(--fs-lg); font-weight: 700; }
   .done { max-width: 600px; margin: var(--sp-12) auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-8); background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-card); }
   .done-total { margin: 0; font-size: var(--fs-lg); }
   .preview-overlay { position: fixed; inset: 0; z-index: 80; background: var(--bg-canvas); display: flex; flex-direction: column; }
+  .preview-overlay:focus { outline: none; }
   .preview-bar { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); background: var(--bg-surface); color: var(--text-secondary); }
   .preview-body { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-6); display: flex; justify-content: center; align-items: flex-start; }
   @media (max-width: 1000px) {
-    .row { grid-template-columns: calc(200px * var(--fs-scale)) minmax(160px, 1fr) 150px 44px; }
+    .row { grid-template-columns: calc(200px * var(--fs-scale)) minmax(160px, 1fr) 150px calc(88px + var(--sp-2)); }
   }
   @container (max-width: 820px) {
     .head { flex-wrap: wrap; }
     .row-head { display: none; }
     .row { grid-template-columns: 1fr; align-items: stretch; padding: var(--sp-4); }
     .mobile-label { display: inline; }
-    .del { justify-self: start; }
+    .row-actions { justify-self: start; }
     .dock { margin-left: calc(-1 * var(--sp-4)); margin-right: calc(-1 * var(--sp-4)); padding: var(--sp-3) var(--sp-4); }
     .actions { width: 100%; }
     .fix { max-width: none; text-align: left; }

@@ -24,6 +24,10 @@ describe('grouped sidebar navigation', () => {
         { href: '/expenses', label: 'New Expense Report' },
         { href: '/expense-history', label: 'History' },
       ] },
+      { id: 'mileage', label: 'Car Mileage', items: [
+        { href: '/mileage-reports', label: 'New Mileage Report' },
+        { href: '/mileage-history', label: 'History' },
+      ] },
       { id: 'lists', label: 'Lists', items: [
         { href: '/clients', label: 'Clients' },
         { href: '/locations', label: 'Locations' },
@@ -45,6 +49,20 @@ describe('grouped sidebar navigation', () => {
     expect(isActive('/expense-history', '/expense-history')).toBe(true);
     expect(isActive('/expense-history', '/expense/42')).toBe(true);
     expect(isActive('/expense-history', '/expenses')).toBe(false);
+  });
+
+  test('activates only Car Mileage History for mileage history and report detail routes', () => {
+    const isActive = extractIsActive();
+    const activeHrefs = (path: string) => navGroups
+      .flatMap((group) => group.items)
+      .filter((item) => isActive(item.href, path))
+      .map((item) => item.href);
+
+    expect(activeHrefs('/mileage-reports')).toEqual(['/mileage-reports']);
+    expect(activeHrefs('/mileage-history')).toEqual(['/mileage-history']);
+    expect(activeHrefs('/mileage-report/42')).toEqual(['/mileage-history']);
+    expect(activeHrefs('/expense/42')).toEqual(['/expense-history']);
+    expect(activeHrefs('/expenses')).toEqual(['/expenses']);
   });
 
   test('renders non-collapsible headings that label each route list and marks the active page', () => {

@@ -12,6 +12,10 @@
       { href: '/expenses', label: 'New Expense Report' },
       { href: '/expense-history', label: 'History' },
     ] },
+    { id: 'mileage', label: 'Car Mileage', items: [
+      { href: '/mileage-reports', label: 'New Mileage Report' },
+      { href: '/mileage-history', label: 'History' },
+    ] },
     { id: 'lists', label: 'Lists', items: [
       { href: '/clients', label: 'Clients' },
       { href: '/locations', label: 'Locations' },
@@ -25,6 +29,7 @@
   const isActive = (href: string, path: string) => {
     if (href === '/') return path === '/';
     if (href === '/expense-history') return path.startsWith('/expense-history') || path.startsWith('/expense/');
+    if (href === '/mileage-history') return path.startsWith('/mileage-history') || path.startsWith('/mileage-report/');
     return path.startsWith(href);
   };
 </script>

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { createSqlJsDb } from './sqljs-adapter';
 import { runMigrations } from './migrate';
+import { MIGRATIONS } from './schema';
 import { allocateSeq } from './numbering-repo';
 import {
   createExpenseDraft,
@@ -23,7 +24,8 @@ import {
   searchExpenses,
   voidExpenseReport,
 } from './expense-repo';
-import type { ExpenseDraft, ExpenseItem } from '../expense/types';
+import { isSectionedExpenseSnapshot } from '../expense/snapshot';
+import type { ExpenseCategory, ExpenseDraft, ExpenseItem, LegacyExpenseSnapshot } from '../expense/types';
 import type { Db } from './db';
 
 async function freshDb() {
@@ -42,6 +44,7 @@ const header = (over: Partial<Omit<ExpenseDraft, 'seq' | 'items'>> = {}) => ({
 
 const item = (over: Partial<ExpenseItem> = {}): ExpenseItem => ({
   position: 0,
+  category: 'general',
   date: '2026-07-02',
   description: 'Fuel',
   amountCents: 5_000,
@@ -88,6 +91,38 @@ describe('expense draft persistence and numbering', () => {
     expect(await peekNextExpenseSeq(db, 2026, id)).toBe(1);
     expect(await peekNextExpenseSeq(db, 2026)).toBe(8);
   });
+
+  test.each<[string, ExpenseCategory[]]>([
+    ['all vehicle', ['vehicle', 'vehicle']],
+    ['all general', ['general', 'general']],
+    ['mixed and interleaved', ['general', 'vehicle', 'general', 'vehicle']],
+  ])('round-trips each row section exactly as saved (%s)', async (_name, categories) => {
+    const db = await freshDb();
+    const id = await createExpenseDraft(db, header());
+    const items = categories.map((category, position) => item({
+      position, category, description: `${category} ${position}`, amountCents: 100 + position,
+    }));
+
+    await saveExpenseDraft(db, id, draft({ seq: null, items }));
+
+    expect((await loadExpenseDraft(db, id)).items).toEqual(items);
+  });
+
+  test('rejects a row outside both sections without touching the saved draft', async () => {
+    const db = await freshDb();
+    const id = await createExpenseDraft(db, header());
+    await saveExpenseDraft(db, id, draft({ seq: null, items: [item({ category: 'vehicle' })] }));
+
+    await expect(saveExpenseDraft(db, id, draft({
+      seq: null,
+      items: [
+        item({ position: 0, category: 'general', description: 'Ink' }),
+        item({ position: 1, category: 'fuel' as ExpenseCategory, description: 'Bad' }),
+      ],
+    }))).rejects.toThrow('Expense row 2 is not in the Vehicle or General/Admin section.');
+
+    expect((await loadExpenseDraft(db, id)).items).toEqual([item({ category: 'vehicle' })]);
+  });
 });
 
 describe('expense finalization', () => {
@@ -119,6 +154,62 @@ describe('expense finalization', () => {
     });
     expect(await reprintExpenseSnapshot(db, id)).toEqual(snapshot);
     expect(await peekNextExpenseSeq(db, 2026)).toBe(12);
+  });
+
+  test('freezes mixed sections with stored subtotals and persists the grouped row order', async () => {
+    const db = await freshDb();
+    const id = await createExpenseDraft(db, header());
+    await saveExpenseDraft(db, id, draft({
+      seq: 12,
+      items: [
+        item({ position: 0, category: 'general', date: '2026-07-03', description: 'Ink', amountCents: 1_250 }),
+        item({ position: 1, category: 'vehicle', date: '2026-07-09', description: 'Parking', amountCents: 800 }),
+        item({ position: 2, category: 'general', date: '2026-07-01', description: 'Phone', amountCents: 4_000 }),
+        item({ position: 3, category: 'vehicle', date: '2026-07-02', description: 'Fuel', amountCents: 5_000 }),
+      ],
+    }));
+
+    const snapshot = await finalizeExpenseReport(db, id);
+
+    expect(snapshot).toMatchObject({
+      snapshotVersion: 2,
+      vehicleSubtotalCents: 5_800,
+      generalSubtotalCents: 5_250,
+      totalCents: 11_050,
+    });
+    const order = ['0:vehicle:Fuel', '1:vehicle:Parking', '2:general:Phone', '3:general:Ink'];
+    expect(snapshot.items.map((row) => `${row.position}:${row.category}:${row.description}`)).toEqual(order);
+    expect((await loadExpenseDraft(db, id)).items.map((row) => `${row.position}:${row.category}:${row.description}`))
+      .toEqual(order);
+    expect(await db.select('SELECT total_cents FROM expense_reports WHERE id = ?', [id]))
+      .toEqual([{ total_cents: 11_050 }]);
+
+    const reprinted = await reprintExpenseSnapshot(db, id);
+    expect(reprinted).toEqual(snapshot);
+    expect(isSectionedExpenseSnapshot(reprinted)).toBe(true);
+  });
+
+  test('refuses to finalize a row whose stored section is unknown, with no side effects', async () => {
+    const db = await freshDb();
+    const id = await createExpenseDraft(db, header());
+    await saveExpenseDraft(db, id, draft({ seq: 13 }));
+    // Simulates a damaged database that lacks the schema CHECK on expense_items.category.
+    const damagedDb: Db = {
+      supportsSqlTransactions: true,
+      select: async (sql, params) => {
+        const rows = await db.select<Record<string, unknown>>(sql, params);
+        return (sql.includes('FROM expense_items')
+          ? rows.map((row) => ({ ...row, category: 'fuel' }))
+          : rows) as never;
+      },
+      execute: (sql, params) => db.execute(sql, params),
+    };
+
+    await expect(finalizeExpenseReport(damagedDb, id)).rejects.toThrow(/unknown section \("fuel"\)/);
+
+    expect(await getExpenseStatus(db, id)).toBe('draft');
+    expect(await db.select('SELECT * FROM expense_year_counters')).toEqual([]);
+    expect((await loadExpenseDraft(db, id)).items).toEqual([item()]);
   });
 
   test('rejects invalid drafts without reserving a number or changing status', async () => {
@@ -259,6 +350,24 @@ describe('expense history and lifecycle', () => {
       .toEqual(['1-2026', '2-2026', '3-2026', '1-2025']);
   });
 
+  test('duplicates every row with its section into a fresh draft', async () => {
+    const db = await freshDb();
+    const source = await finalized(db, {
+      seq: 4,
+      items: [
+        item({ position: 0, category: 'general', date: '2026-07-05', description: 'Ink', amountCents: 700 }),
+        item({ position: 1, category: 'vehicle', date: '2026-07-06', description: 'Fuel', amountCents: 5_000 }),
+      ],
+    });
+
+    const copy = await duplicateExpenseReport(db, source, header({ reportDate: '2026-08-01' }));
+
+    expect((await loadExpenseDraft(db, copy)).items).toEqual([
+      item({ position: 0, category: 'vehicle', date: '2026-07-06', description: 'Fuel', amountCents: 5_000 }),
+      item({ position: 1, category: 'general', date: '2026-07-05', description: 'Ink', amountCents: 700 }),
+    ]);
+  });
+
   test('duplicates to a fresh editable draft and guards status transitions', async () => {
     const db = await freshDb();
     const source = await finalized(db, { seq: 4, items: [item({ description: 'Meals', amountCents: 2_500 })] });
@@ -368,6 +477,7 @@ describe('expense history and lifecycle', () => {
     });
     expect(summary.reports.map((report) => report.reportNumber)).toEqual(['4-2026']);
     expect(summary.items.map((row) => row.description)).toEqual(['June fuel', 'August parking']);
+    expect(summary.items.map((row) => row.category)).toEqual(['general', 'general']);
     expect(summary.items.reduce((sum, row) => sum + row.amountCents, 0))
       .toBe(summary.reports.reduce((sum, report) => sum + report.totalCents, 0));
   });
@@ -403,5 +513,107 @@ describe('expense history and lifecycle', () => {
       'Report one', 'Report three first', 'Report three second',
     ]);
     expect(summary.reports.every((report) => report.status === 'finalized')).toBe(true);
+  });
+
+  test('reads each summary item section while keeping the flat date order', async () => {
+    const db = await freshDb();
+    await finalized(db, {
+      seq: 6,
+      items: [
+        item({ position: 0, category: 'general', date: '2026-07-01', description: 'Phone' }),
+        item({ position: 1, category: 'vehicle', date: '2026-07-03', description: 'Fuel' }),
+        item({ position: 2, category: 'general', date: '2026-07-02', description: 'Ink' }),
+      ],
+    });
+
+    const summary = await expenseSummaryForRange(db, null);
+
+    expect(summary.items.map((row) => `${row.itemDate}:${row.category}:${row.description}`)).toEqual([
+      '2026-07-01:general:Phone',
+      '2026-07-02:general:Ink',
+      '2026-07-03:vehicle:Fuel',
+    ]);
+  });
+});
+
+describe('expense reports saved before sections existed (schema v6)', () => {
+  async function dbAtSchemaV6() {
+    const db = await createSqlJsDb();
+    for (const migration of MIGRATIONS.filter((entry) => entry.version <= 6)) {
+      for (const sql of migration.statements) await db.execute(sql);
+    }
+    await db.execute('PRAGMA user_version = 6');
+    return db;
+  }
+
+  const legacy: LegacyExpenseSnapshot = {
+    reportNumber: '2-2026', seq: 2, year: 2026, reportDate: '2026-06-30',
+    periodStart: '2026-06-01', periodEnd: '2026-06-30',
+    inspectorName: 'North Star', inspectorAddress: '1 Main', inspectorNumber: 'ON-7', logoDataUrl: '',
+    items: [
+      { position: 0, date: '2026-06-02', description: 'Fuel', amountCents: 5_000 },
+      { position: 1, date: '2026-06-10', description: 'Printer ink', amountCents: 1_250 },
+    ],
+    totalCents: 6_250,
+  };
+
+  /** Seed rows the way the pre-section app wrote them, then upgrade to the current schema. */
+  async function upgradedLegacyDb({ withDraft }: { withDraft: boolean }) {
+    const db = await dbAtSchemaV6();
+    await db.execute(
+      `INSERT INTO expense_reports
+         (id, year, seq, status, report_date, period_start, period_end, finalized_at, total_cents, snapshot_json)
+       VALUES (1, 2026, 2, 'finalized', '2026-06-30', '2026-06-01', '2026-06-30', '2026-06-30T12:00:00Z', 6250, ?)`,
+      [JSON.stringify(legacy)],
+    );
+    const rows: Array<readonly [number, number, string, string, number]> = [
+      [1, 0, '2026-06-02', 'Fuel', 5_000],
+      [1, 1, '2026-06-10', 'Printer ink', 1_250],
+    ];
+    if (withDraft) {
+      await db.execute(
+        `INSERT INTO expense_reports (id, year, status, report_date, period_start, period_end)
+         VALUES (2, 2026, 'draft', '2026-07-15', '2026-07-01', '2026-07-15')`,
+      );
+      rows.push([2, 0, '2026-07-03', 'Unfinished parking', 900]);
+    }
+    for (const [reportId, position, date, description, cents] of rows) {
+      await db.execute(
+        `INSERT INTO expense_items (expense_report_id, position, date, description, amount_cents)
+         VALUES (?, ?, ?, ?, ?)`,
+        [reportId, position, date, description, cents],
+      );
+    }
+    await runMigrations(db);
+    return db;
+  }
+
+  test('upgrade keeps legacy snapshots flat while their rows default to General/Admin', async () => {
+    const db = await upgradedLegacyDb({ withDraft: true });
+
+    const reprinted = await reprintExpenseSnapshot(db, 1);
+    expect(reprinted).toEqual(legacy);
+    expect(isSectionedExpenseSnapshot(reprinted)).toBe(false);
+    expect((await loadExpenseDraft(db, 2)).items).toEqual([item({
+      date: '2026-07-03', description: 'Unfinished parking', amountCents: 900,
+    })]);
+    expect(await expenseYearRollup(db, 2026)).toEqual({ count: 1, totalCents: 6_250 });
+  });
+
+  test('a duplicated legacy report starts with every row in General/Admin and finalizes sectioned', async () => {
+    const db = await upgradedLegacyDb({ withDraft: false });
+
+    const copy = await duplicateExpenseReport(db, 1, header({
+      reportDate: '2026-06-30', periodStart: '2026-06-01', periodEnd: '2026-06-30',
+    }));
+    expect((await loadExpenseDraft(db, copy)).items.map((row) => row.category))
+      .toEqual(['general', 'general']);
+
+    await saveExpenseDraft(db, copy, { ...(await loadExpenseDraft(db, copy)), seq: 3 });
+    const snapshot = await finalizeExpenseReport(db, copy);
+    expect(snapshot).toMatchObject({
+      snapshotVersion: 2, vehicleSubtotalCents: 0, generalSubtotalCents: 6_250, totalCents: 6_250,
+    });
+    expect(await reprintExpenseSnapshot(db, 1)).toEqual(legacy);
   });
 });

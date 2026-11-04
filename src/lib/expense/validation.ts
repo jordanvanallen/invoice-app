@@ -1,4 +1,5 @@
-import type { ExpenseBlocker, ExpenseDraft, ExpenseItem } from './types';
+import type { ExpenseBlocker, ExpenseCategory, ExpenseDraft, ExpenseItem } from './types';
+import { EXPENSE_CATEGORY_ROW_NOUNS, isExpenseCategory } from './category';
 import { isDateOutsidePeriod, isValidIsoDate } from '../validation';
 
 export const EXPENSE_DATE_OUTSIDE_PERIOD_MESSAGE = 'Date is outside the reporting period';
@@ -60,16 +61,21 @@ export function expenseFinalizeBlockers(draft: ExpenseDraft): ExpenseBlocker[] {
   if (draft.items.length === 0) {
     blockers.push({ field: 'items', itemIndex: null, message: 'Add at least one expense.' });
   }
+  const sectionCounts: Record<ExpenseCategory, number> = { vehicle: 0, general: 0 };
   draft.items.forEach((item, itemIndex) => {
+    // Rows are numbered within their own section, matching the editor's labels.
+    const label = isExpenseCategory(item.category)
+      ? `${EXPENSE_CATEGORY_ROW_NOUNS[item.category]} ${++sectionCounts[item.category]}`
+      : `expense ${itemIndex + 1}`;
     if (!item.date.trim()) {
       blockers.push({
         field: 'date', itemIndex,
-        message: `Choose a date for expense ${itemIndex + 1}.`,
+        message: `Choose a date for ${label}.`,
       });
     } else if (!isValidIsoDate(item.date)) {
       blockers.push({
         field: 'date', itemIndex,
-        message: `Choose a valid date for expense ${itemIndex + 1}.`,
+        message: `Choose a valid date for ${label}.`,
       });
     } else if (periodAllowsRows && isDateOutsidePeriod(
       item.date, draft.periodStart, draft.periodEnd,
@@ -82,13 +88,19 @@ export function expenseFinalizeBlockers(draft: ExpenseDraft): ExpenseBlocker[] {
     if (!item.description.trim()) {
       blockers.push({
         field: 'description', itemIndex,
-        message: `Enter a description for expense ${itemIndex + 1}.`,
+        message: `Enter a description for ${label}.`,
       });
     }
     if (!Number.isInteger(item.amountCents) || item.amountCents <= 0) {
       blockers.push({
         field: 'amountCents', itemIndex,
-        message: `Enter an amount greater than $0.00 for expense ${itemIndex + 1}.`,
+        message: `Enter an amount greater than $0.00 for ${label}.`,
+      });
+    }
+    if (!isExpenseCategory(item.category)) {
+      blockers.push({
+        field: 'category', itemIndex,
+        message: `Put ${label} in the Vehicle or General/Admin section.`,
       });
     }
   });

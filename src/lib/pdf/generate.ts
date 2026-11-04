@@ -7,6 +7,8 @@ import { buildInvoiceDoc } from './invoiceDoc';
 import { buildExpenseDoc } from './expenseDoc';
 import { buildSummaryDoc, type SummaryInput } from './yearSummaryDoc';
 import { buildExpenseSummaryDoc, type ExpenseSummaryInput } from './expenseSummaryDoc';
+import type { MileageSnapshot } from '../mileage/types';
+import { buildMileageDoc } from './mileageDoc';
 import { getInvoiceFolder } from '../stores/prefs';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -65,6 +67,11 @@ export function expensePdfBytes(snapshot: ExpenseSnapshot): Promise<Uint8Array> 
   return docBytes(buildExpenseDoc(snapshot));
 }
 
+/** Car mileage report PDF bytes (exposed for tests). */
+export function mileagePdfBytes(snapshot: MileageSnapshot): Promise<Uint8Array> {
+  return docBytes(buildMileageDoc(snapshot));
+}
+
 /** Tax-summary PDF bytes (exposed for tests). */
 export function summaryPdfBytes(input: SummaryInput): Promise<Uint8Array> {
   return docBytes(buildSummaryDoc(input));
@@ -84,6 +91,14 @@ export function saveExpensePdf(snapshot: ExpenseSnapshot): Promise<SaveResult> {
     buildExpenseDoc(snapshot),
     `Expense-Report-${snapshot.reportNumber}.pdf`,
     `${snapshot.year}-expenses`,
+  );
+}
+
+export function saveMileagePdf(snapshot: MileageSnapshot): Promise<SaveResult> {
+  return savePdfDoc(
+    buildMileageDoc(snapshot),
+    `Mileage-Report-${snapshot.reportNumber}.pdf`,
+    `${snapshot.year}-mileage`,
   );
 }
 

@@ -1,6 +1,6 @@
 # Invoice Maker
 
-A small, offline desktop app for creating vehicle-inspection invoices and expense reports. It runs on Windows for the end user and is developed on Linux. Built with **Tauri 2 + SvelteKit + TypeScript**, with a local **SQLite** database and **PDF** generation.
+A small, offline desktop app for creating vehicle-inspection invoices, expense reports, and car mileage reports. It runs on Windows for the end user and is developed on Linux. Built with **Tauri 2 + SvelteKit + TypeScript**, with a local **SQLite** database and **PDF** generation.
 
 - **Product name:** Invoice Maker
 - **Bundle identifier:** `com.app.invoice`
@@ -17,7 +17,8 @@ A small, offline desktop app for creating vehicle-inspection invoices and expens
 - Fuzzy client/location pickers with “add new” inline.
 - Automatic fee + HST + total math (money stored as integer cents, tax as basis points).
 - Generates a clean PDF and keeps an immutable snapshot of every finalized invoice for faithful reprints.
-- Creates separately numbered expense reports with dated rows, reporting-period validation, immutable PDFs, and a separate history.
+- Creates separately numbered expense reports with **Vehicle expenses** and **General/Admin expenses** sections (rows can move between them), per-section subtotals, reporting-period validation, immutable PDFs, and a separate history. Reports finalized before sections existed keep their original single list on reprint.
+- Creates standalone, separately numbered **car mileage reports**: a vehicle plus dated trips (from, to, purpose, start/end odometer in whole kilometres) with calculated distances and totals, draft autosave/resume, preview, lock, PDFs filed under `YYYY-mileage/`, and a history with view, reprint, cancel, and restore. Distances only — no reimbursement, per-km, tax, or legal rates.
 - History with per‑year and custom date‑range tax summaries.
 - Cancel (void) / restore invoices without losing history.
 - Auto-backup of the database on finalization; configurable save folder (point it at Dropbox/OneDrive for off-machine copies).
@@ -32,7 +33,7 @@ A small, offline desktop app for creating vehicle-inspection invoices and expens
 | Data | SQLite via `tauri-plugin-sql` (tests use `sql.js`) |
 | PDF | `pdfmake` 0.3 |
 | Plugins | `fs`, `dialog`, `opener`, `process`, `updater` |
-| Tests | Vitest (pure logic: money, totals, numbering, validation, snapshot) |
+| Tests | Vitest (pure logic and repositories on in-memory `sql.js`); `cargo test` (native SQLite transactions and shipped migrations) |
 
 ## Repository layout
 
@@ -40,9 +41,9 @@ A small, offline desktop app for creating vehicle-inspection invoices and expens
 <repo root>/                       # the app lives at the root
 ├─ .github/workflows/release.yml   # CI: builds + signs the Windows installer on v* tags
 ├─ src/                            # SvelteKit frontend
-│  ├─ routes/                      # invoice/expense editors, histories, detail pages, catalogs, backups, settings
+│  ├─ routes/                      # invoice/expense/mileage editors, histories, detail pages, catalogs, backups, settings
 │  ├─ lib/components/              # DatePicker, FuzzyCombobox, InvoiceSection, AppShell, …
-│  ├─ lib/db/                      # repositories + DB adapter
+│  ├─ lib/db/                      # repositories, DB adapter, append-only migrations (schema.ts), restore checks
 │  ├─ lib/pdf/                     # pdfmake document builders
 │  └─ app.css                      # design tokens (colors, spacing, type scale)
 ├─ src-tauri/                      # Rust shell, tauri.conf.json, capabilities
@@ -93,7 +94,11 @@ Frontend‑only preview (no Rust shell, no SQLite/PDF): `npm run dev`.
 ```bash
 npm run check     # svelte-check — aim for 0 errors / 0 warnings
 npm test          # Vitest unit tests
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check   # Rust formatting
+cargo test --manifest-path src-tauri/Cargo.toml --locked          # native SQLite + migration tests
 ```
+
+These are the same checks the release workflow runs before building. The version‑7 native migration tests replay the migrations straight from `src/lib/db/schema.ts`, so they exercise exactly the statements that ship.
 
 The GUI itself can’t be verified headlessly; rely on `check` + `test` here and a visual pass via `tauri dev`.
 
@@ -137,9 +142,11 @@ The installed app checks `https://github.com/jordanvanallen/invoice-app/releases
 
 ## Data, storage & permissions
 
-- **Database:** SQLite in the OS app‑data dir (`$APPDATA` on Windows). Created and migrated on first launch.
-- **Output folder:** PDFs and the `invoice-backup.db` copy save to the user’s **Downloads** by default, or a folder they choose in Settings (e.g. a Dropbox/OneDrive folder for off‑machine backups).
-- **Backups:** a full DB copy is written on finalize and via **Settings → Back up now** (uses SQLite `VACUUM INTO`).
+- **Database:** SQLite in the OS app‑data dir (`$APPDATA` on Windows). Created on first launch and upgraded automatically at startup whenever a new version needs it — no manual setup.
+- **Schema migrations:** `src/lib/db/schema.ts` is append‑only; never edit a shipped version, add the next one. At startup each pending version runs as one transaction together with its `PRAGMA user_version` stamp, so an upgrade either completes or leaves the previous version untouched. Version 7 adds the expense `category` column (existing rows become `general`) and the mileage tables, preserving all existing data. Downgrades are not supported — an older build will not restore a newer backup — so recovering from a bad release means shipping a fixed version or restoring a pre‑upgrade backup.
+- **Output folder:** PDFs save to the user’s **Downloads** by default, or the folder chosen in **Settings → General**. Invoices and reports are filed by year (`2026-invoices/`, `2026-expenses/`, `2026-mileage/`); summaries go in `tax-summaries/` and `expense-summaries/`.
+- **Backups:** a dated full DB copy (`invoice-backup-YYYY-MM-DD.db`, last 14 kept) is written on finalize and via **Settings → Backups → Back up now** (uses SQLite `VACUUM INTO`), in the backup folder chosen there.
+- **Restore:** **Settings → Backups → Restore from a backup** validates the file in its own connection — integrity, a supported schema version, the objects that version requires, and that the pending upgrades can apply — then swaps it in on relaunch after saving the current data to `invoice-before-restore.db`.
 - **Filesystem scope:** `capabilities/default.json` restricts `fs` write/remove to `$HOME`, `$DOWNLOAD`, and `$APPDATA`.
 
 ## Troubleshooting (dev)

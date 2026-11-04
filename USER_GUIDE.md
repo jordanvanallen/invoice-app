@@ -4,9 +4,10 @@ A simple guide to installing and using **Invoice Maker** on your Windows PC. No 
 
 Invoice Maker lets you:
 - Build invoices for completed inspections and no‑shows.
-- Create simple expense reports with dated descriptions and amounts.
+- Create expense reports with separate **Vehicle expenses** and **General/Admin expenses** sections.
+- Keep car mileage reports: dated trips with start and end odometer readings for one vehicle.
 - Save them as tidy PDFs you can email or print.
-- Keep separate histories for invoices and expense reports, and pull invoice tax summaries.
+- Keep separate histories for invoices, expense reports, and mileage reports, and pull invoice tax summaries.
 - Automatically back up all your data.
 
 Everything stays **on your computer** — nothing is uploaded anywhere.
@@ -41,19 +42,17 @@ Click to continue when done. You can change any of this later in **Settings**.
 
 ## Stage 3 — Get comfortable with the screen
 
-On the **left** is the menu:
+On the **left** is the menu, grouped into sections:
 
-| Menu item | What it’s for |
-|---|---|
-| **New Invoice** | Create the invoice you’re working on now |
-| **Invoice History** | See, reprint, or duplicate past invoices; tax summaries |
-| **Expense Reports** | Create the expense report you’re working on now |
-| **Expense History** | See, reprint, duplicate, cancel, or restore expense reports |
-| **Clients** | Manage your list of clients (add, rename, hide) |
-| **Locations** | Manage your list of inspection locations |
-| **Settings** | Your details, prices, theme, text size, save folder, updates |
+| Section | Menu items | What they’re for |
+|---|---|---|
+| **Invoices** | **New Invoice**, **History** | Create the invoice you’re working on now; see, reprint, or duplicate past invoices and get tax summaries |
+| **Expenses** | **New Expense Report**, **History** | Create the expense report you’re working on now; see, reprint, duplicate, cancel, or restore expense reports |
+| **Car Mileage** | **New Mileage Report**, **History** | Record trips and odometer readings; see, reprint, cancel, or restore mileage reports |
+| **Lists** | **Clients**, **Locations**, **Approvers** | Manage the names you pick from on invoices (add, rename, hide) |
+| **Settings** | **General**, **Backups** | Your details, prices, theme, text size, PDF folder, and updates; backup folder, **Back up now**, and restoring a backup |
 
-The menu stays in place while you scroll. Your name and the last backup time show at the bottom of the menu.
+In this guide, **Expenses → History** means the **History** item in the **Expenses** section. The menu stays in place while you scroll (if it is taller than your window, the menu scrolls by itself). Your name and the last backup time show at the bottom of the menu.
 
 ---
 
@@ -107,25 +106,45 @@ Use **Approvers** in the sidebar to rename, hide, or remove names. Names used on
 
 Once locked, the invoice becomes a permanent record. You can always reprint it from History.
 
-> Where do PDFs go? By default your **Downloads** folder. You can change this in **Settings → Where files are saved**.
+> Where do PDFs go? By default your **Downloads** folder, filed in a folder for each year (for example `2026-invoices`). You can change this in **Settings → General → Where invoices are saved**; the same folder holds your expense and mileage report PDFs.
 
 ### Create an expense report
 
-1. Open **Expense Reports** from the left menu. The latest unfinished report opens automatically and autosaves as you work.
+1. Open **Expenses → New Expense Report**. The latest unfinished report opens automatically and autosaves as you work.
 2. Check the **report number**, **report date**, and **reporting period** at the top.
-3. Fill in each row's **Date**, **Description**, and **Amount**. Use **+ Add an expense** for another row or the **✕** to remove one. If you remove one by accident, choose **Undo**.
-4. Rows stay still while you type. Click **Sort rows by date** when you want to arrange them. Opening **Preview** also sorts the editor first, so closing Preview returns to the same order you reviewed.
-5. Click **Lock & Save** when every row is complete. The app sorts the saved report by date, creates its PDF, and backs up your data.
+3. The report has two sections, like an invoice: **Vehicle expenses** and **General/Admin expenses**. Click **+ Add a vehicle expense** or **+ Add a general/admin expense** to add a row to that section, then fill in its **Date**, **Description**, and **Amount**. Use the **✕** to remove a row. If you remove one by accident, choose **Undo**.
+4. Put a row in the wrong section? Click its arrow button (**↓** in Vehicle expenses, **↑** in General/Admin expenses) to move it to the other section. Everything you typed moves with it.
+5. Each section shows its own **subtotal**, and the report **total** is the two subtotals added together. A report needs at least one expense, but either section may be left empty.
+6. Rows stay still while you type. Click **Sort rows by date** to arrange each section from oldest to newest. Opening **Preview** also sorts the editor first, so closing Preview returns to the same order you reviewed.
+7. Click **Lock & Save** when every row is complete. The app sorts each section by date, creates a PDF showing both sections with their subtotals and the total, files it in that year’s folder (for example `2026-expenses`), and backs up your data.
 
-Locked expense reports cannot be edited. Open **Expense History** to view or save the PDF again, duplicate one into a new editable draft, or cancel and restore a report. Cancelled expense reports are kept in a separate **Cancelled expense reports** section and do not count in yearly expense totals.
+Locked expense reports cannot be edited. Open **Expenses → History** to view or save the PDF again, duplicate one into a new editable draft, or cancel and restore a report. Cancelled expense reports are kept in a separate **Cancelled expense reports** section and do not count in yearly expense totals.
+
+Expense reports locked before sections were added keep their original single list of rows, so viewing or saving their PDF again shows them exactly as they were saved. Rows in a report that was still unfinished at that time start in **General/Admin expenses**; move any vehicle costs with the arrow button. Duplicating an older report also places its rows in **General/Admin expenses**, where you can move vehicle costs before locking the new report.
 
 The app keeps one unfinished expense report at a time so work cannot get hidden. Finish it before duplicating a saved report.
+
+### Create a car mileage report
+
+Car mileage reports are a separate log of the kilometres you drive, with their own numbers and history. They are not the optional **Mileage** charge on invoice rows described above.
+
+1. Open **Car Mileage → New Mileage Report**. Your unfinished mileage report opens automatically and autosaves as you work, so you can close the app and finish it later.
+2. Check the **reporting period** and **report date**, and enter the **Vehicle** (for example the make, model, or plate).
+3. Click **+ Add a trip** for each trip and fill in its **Date**, **From**, **To**, **Purpose**, **Start odometer (km)**, and **End odometer (km)**. Readings are whole kilometres. The trip’s distance and the report’s total are calculated for you.
+4. You can leave an odometer reading blank until you have it — blank is not the same as **0**, which counts as a real reading. Your draft keeps saving even if a reading is missing or the end reading is still lower than the start; that trip shows a note, and its distance shows **—** until both readings are complete.
+5. Remove a trip with the **✕** (choose **Undo** if that was a mistake). Click **Sort trips by date** to arrange them from oldest to newest.
+6. When the report is complete, click **Preview** to check it, then **Lock & Save**. Locking needs the vehicle and, for every trip, a date inside the reporting period, a From, To, and Purpose, and both readings with the end reading greater than the start. Until then, click the warning link beside **Lock & Save** to jump to the first thing that needs attention.
+7. Locking gives the report its own number (for example `1-2026`), counted separately from invoices and expense reports and starting again each year. The app creates its PDF in that year’s mileage folder (for example `2026-mileage`) and backs up your data.
+
+Mileage reports record distances only. They do not calculate a reimbursement amount or apply any per‑kilometre, tax, or legal rate.
+
+Locked mileage reports cannot be edited. Open **Car Mileage → History** to view a report or save its PDF again, or to cancel and restore one. Cancelled mileage reports are kept, not deleted, and can be restored later.
 
 ---
 
 ## Stage 6 — History, reprints & tax summaries
 
-Open **Invoice History** to see every finalized invoice, grouped by year.
+Open **Invoices → History** to see every finalized invoice, grouped by year.
 
 - **View an invoice:** click its **number** (e.g. `#3‑2026`) or the **View** button.
 - **Download PDF again:** click **Download PDF** on any row.
@@ -155,10 +174,11 @@ Cancelled invoices stay in your records and don’t count toward income or HST u
 
 Invoice Maker protects your data automatically:
 
-- A full backup (`invoice-backup.db`) is saved **every time you finalize an invoice or expense report**.
-- You can back up any time from **Settings → Where files are saved → Back up now**. The last backup time shows at the bottom of the left menu.
+- A full backup is saved **every time you lock an invoice, expense report, or mileage report**, as a dated file (`invoice-backup-YYYY-MM-DD.db`). The 14 most recent are kept.
+- You can back up any time from **Settings → Backups → Back up now**. The last backup time shows at the bottom of the left menu.
+- To bring back your data from a backup — for example on a new computer — use **Settings → Backups → Restore from a backup**. The app checks the file first, shows what it contains (including how many invoices, expense reports, and mileage reports were locked), and saves a copy of your current data before replacing it.
 
-**Strongly recommended:** in **Settings**, set your save folder to a **Dropbox**, **OneDrive**, or **Google Drive** folder. Then every PDF and backup is copied off your computer automatically — so you’re safe even if the PC fails.
+**Strongly recommended:** set **Settings → Backups → Where backups are saved** (and, if you like, **Settings → General → Where invoices are saved** for PDFs) to a **Dropbox**, **OneDrive**, or **Google Drive** folder. Then your backups and PDFs are copied off your computer automatically — so you’re safe even if the PC fails.
 
 ---
 
@@ -168,21 +188,25 @@ You don’t need to download new versions manually.
 
 - When you open the app, it checks for a newer version and **offers to update** with one click (it installs and restarts itself).
 - You can also check on demand: **Settings → About & updates → Check for updates**.
+- When an update adds new features, the app upgrades your saved data automatically the first time it opens. There is nothing to set up, and your existing invoices, expense reports, and settings are kept exactly as they were.
+- Updates only move forward. An older version of the app cannot restore a backup made by a newer one, so don’t reinstall an older version to undo an update. If something looks wrong after updating, install the next update when it is offered, or restore a backup you made before updating.
 
 ---
 
 ## Settings reference
 
-Everything you can adjust, in **Settings**:
+Everything you can adjust, in **Settings → General**:
 
 - **Display** — Dark/Light theme and text size (Normal / Large / Extra‑large).
-- **Where files are saved** — choose your PDF + backup folder, open it, or back up now.
+- **Where invoices are saved** — choose the folder for all your PDFs (invoices, expense reports, and mileage reports), or open it.
 - **You / your business** — your name, address, inspector number.
 - **Tax** — HST registration number and tax rate (default 13%).
 - **Default prices** — completed and no‑show fees.
 - **Who you bill** — the company name and address invoices are billed to.
 - **Invoice footer** — payment email and a footer note.
 - **About & updates** — your version number and the update checker.
+
+And in **Settings → Backups**: where backups are saved, **Back up now**, and **Restore from a backup**.
 
 ---
 
@@ -191,12 +215,16 @@ Everything you can adjust, in **Settings**:
 | Question | Answer |
 |---|---|
 | **“Windows protected your PC” when installing** | Click **More info → Run anyway**. Normal for new apps. |
-| **My PDF didn’t appear** | Check the folder shown in the save message, or **Settings → Where files are saved → Open this folder**. |
+| **My PDF didn’t appear** | Check the folder shown in the save message, or **Settings → General → Where invoices are saved → Open this folder**. |
 | **“Date is outside the billing period” warning** | Just informational — it won’t stop you saving or finalizing. |
-| **I cancelled an invoice by accident** | Invoice History → red **Cancelled invoices** button → **Restore**. |
-| **I cancelled an expense report by accident** | Expense History → **Cancelled expense reports** → **Restore**. |
+| **I cancelled an invoice by accident** | **Invoices → History** → red **Cancelled invoices** button → **Restore**. |
+| **I cancelled an expense report by accident** | **Expenses → History** → **Cancelled expense reports** → **Restore**. |
+| **I cancelled a mileage report by accident** | **Car Mileage → History** → find it among the cancelled mileage reports → **Restore**. |
+| **I can’t lock my mileage report** | Every trip needs both odometer readings in whole kilometres, the end reading greater than the start, and a date inside the reporting period. |
+| **An expense is in the wrong section** | Click the row’s arrow button to move it between **Vehicle expenses** and **General/Admin expenses**. |
+| **It says “Couldn’t save — retrying” and won’t let me leave the page** | Your latest changes are still on screen and it keeps trying to save them; the app won’t switch pages until they’re saved, so nothing is lost. Try again once it shows **Saved**. On a new invoice, also check that the invoice number is valid. |
 | **Text is too small to read** | **Settings → Display → Large** or **Extra‑large**. |
-| **Is my data safe / backed up?** | Yes — it backs up on every save. Point the save folder at Dropbox/OneDrive for an off‑machine copy. |
+| **Is my data safe / backed up?** | Yes — it backs up every time you lock an invoice or report, and whenever you choose **Back up now**. Point **Settings → Backups → Where backups are saved** at Dropbox/OneDrive for an off‑machine copy. |
 | **How do I get the newest version?** | It updates itself on launch, or use **Settings → Check for updates**. |
 
 ---

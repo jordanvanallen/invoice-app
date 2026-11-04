@@ -38,13 +38,13 @@
 </script>
 
 <h1>Backups</h1>
-<p class="lead">Your safety net — a full copy of every invoice and setting, so nothing is lost if your computer fails or you move to a new one.</p>
+<p class="lead">Your safety net — a full copy of every invoice, expense report, mileage report, and setting, so you can recover your records if your computer fails or you move to a new one.</p>
 
 <div class="form">
   <section>
     <h2>Where backups are saved</h2>
     <p class="folder-now">Backups save here as dated files (invoice-backup-YYYY-MM-DD.db, last 14 kept): <b>{backupFolder || 'Downloads (default)'}</b></p>
-    <p class="seg-label">Point this at Dropbox / OneDrive / Google&nbsp;Drive to keep an off-machine copy of all your data — then a dead computer never means lost invoices.</p>
+    <p class="seg-label">Point this at Dropbox / OneDrive / Google&nbsp;Drive to keep an off-machine copy of all your records.</p>
     <div class="seg">
       <button onclick={chooseFolder}>Choose folder…</button>
       <button onclick={openFolder}>Open this folder</button>
@@ -53,7 +53,7 @@
     <div class="seg">
       <button onclick={doBackup} disabled={backingUp}>{backingUp ? 'Backing up…' : 'Back up now'}</button>
       <span class="bk-status" class:warn={$backupFailed}>
-        {#if $backupFailed}⚠ Last backup failed{$backupError ? `: ${$backupError}` : ''}{:else if $lastBackupAt}✓ Backed up {$lastBackupAt}{:else}Backs up automatically when you finalize an invoice{/if}
+        {#if $backupFailed}⚠ Last backup failed{$backupError ? `: ${$backupError}` : ''}{:else if $lastBackupAt}✓ Backed up {$lastBackupAt}{:else}Backs up automatically when you lock an invoice or report{/if}
       </span>
     </div>
     <p class="age" class:warn={stale}>
