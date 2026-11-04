@@ -194,5 +194,18 @@ jobs:
       - name: Validate complete updater manifest and signatures
         run: python3 scripts/verify-release.py "$RELEASE_TAG" release-artifacts
 
+      # Optional per-release notes committed with the tag replace the generated
+      # description, so they must repeat the Mac first-launch instructions.
+      - name: Use the tagged release notes when present
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="docs/releases/$RELEASE_TAG.md"
+          if [ -f "$notes" ]; then
+            gh release edit "$RELEASE_TAG" --notes-file "$notes"
+          else
+            echo "No $notes in the tagged commit; keeping the generated release description."
+          fi
+
       - name: Publish the verified release
         run: gh release edit "$RELEASE_TAG" --draft=false --latest

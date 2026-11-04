@@ -148,11 +148,13 @@ The installed app checks `https://github.com/jordanvanallen/invoice-app/releases
 1. Merge the reviewed release commit to `main` and make sure the worktree is clean.
 2. Tag that commit with the next version and push it. The workflow injects the tag version into `package.json` and `src-tauri/tauri.conf.json` before building:
    ```bash
-   git tag v0.3.3
-   git push origin v0.3.3
+   git tag v0.4.0
+   git push origin v0.4.0
    ```
+   To publish written release notes, commit them as `docs/releases/<tag>.md` (for example `docs/releases/v0.4.0.md`) before tagging. They replace the generated description, so include the Mac first-launch instructions. Without that file the generated description is kept.
 3. `.github/workflows/release.yml` checks and builds Windows installers and a **universal Mac DMG**. It signs updater artifacts with `TAURI_SIGNING_PRIVATE_KEY`, verifies the Mac bundle signature and architectures, and holds the release as a draft until both platform builds and release checks succeed.
 4. The workflow publishes the complete release with installers, updater artifacts, signatures, and `latest.json`. Confirm the release contains updater entries for Windows and both Mac architectures. Installed apps then detect the release and offer the update.
+   If the Mac build or publication fails after the Windows draft exists (for example a transient runner failure), re-run it from **Actions → Release → Run workflow** with that tag as `release_tag`. That resumes the Mac build and publication for the existing draft from the same tagged commit; it does not rebuild Windows.
 5. Test the downloaded DMG on a Mac: copy **Invoice Maker** into **Applications**, open it there, and complete the one-time **System Settings → Privacy & Security → Open Anyway** approval. Follow the [Mac installation guide](./USER_GUIDE.md#macos). A build launched directly from the local build folder does not exercise the downloaded-app approval flow.
 
 > ⚠️ **Don’t lose or rotate away the private key without re‑issuing signed builds.** If the key is lost, already‑installed apps can no longer verify updates and would need a manual reinstall.
