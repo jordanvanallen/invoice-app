@@ -86,7 +86,9 @@ jobs:
     # uploads so macOS retains the Windows updater entries.
     needs: release
     if: ${{ !cancelled() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch') }}
-    runs-on: macos-14
+    # Pinned, not macos-latest. GitHub retired macOS 14 runners:
+    # https://github.com/actions/runner-images/issues/13518
+    runs-on: macos-15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
