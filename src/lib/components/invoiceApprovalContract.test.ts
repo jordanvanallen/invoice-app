@@ -195,7 +195,7 @@ describe('invoice approval component contracts', () => {
     const route = readSource('src/routes/+page.svelte');
     expect(route.match(/<InvoiceSection/g)).toHaveLength(2);
     expect(route).toContain('{approvers} {addApprover}');
-    expect(route).toContain('invoiceFinalizeBlockers(buildDraft())');
+    expect(route).toContain('invoiceFinalizeBlockers(buildDraft(), billed)');
     expect(route).toContain('mileage-approver-${uid}');
     expect(route).toContain('mileage-approval-date-${uid}');
     expect(route).toContain('<InvoiceView snap={previewSnap} preview />');
@@ -251,7 +251,7 @@ describe('invoice approval component contracts', () => {
       route.indexOf('async function doFinalize()'),
     );
 
-    expect(route).toContain('const finalizeBlockers = $derived(invoiceFinalizeBlockers(buildDraft()));');
+    expect(route).toContain('const finalizeBlockers = $derived(invoiceFinalizeBlockers(buildDraft(), billed));');
     expect(route).toContain('const blockedLineIndices = $derived(new Set(');
     expect(route).toContain('const blockerCount = $derived(blockedLineIndices.size);');
     expect(route).toContain("const canFinalize = $derived(finalizeBlockers.length === 0 && seqState.status === 'ready');");

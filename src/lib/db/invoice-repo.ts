@@ -4,7 +4,12 @@ import type { DraftInvoice, LineItem, FinalizedSnapshot } from '../types';
 import { orderInvoiceLines } from '../lineOrder';
 import { buildFinalizedSnapshot } from '../snapshot';
 import { checkOverride } from '../numbering';
-import { invoiceFinalizeBlockers } from '../validation';
+import {
+  completedIdentifierConflict,
+  invoiceFinalizeBlockers,
+  type BilledIdentifiers,
+  type IdentifiedLine,
+} from '../validation';
 import { getSettings } from './settings-repo';
 import { takenSeqs } from './numbering-repo';
 import type { ClosedDateRange } from '../history/history';
@@ -227,6 +232,48 @@ function isAffectedRowConflict(error: unknown): boolean {
   return /^Expected 1 row\(s\) affected; affected 0\.$/i.test(message);
 }
 
+/**
+ * SQL condition: a completed row of invoice `?` shares its exact VIN or inspection # with
+ * another completed row (a different line item id) that is on an active invoice or on the
+ * same invoice. Scoped to that one invoice, so unrelated legacy duplicates never block it;
+ * no-show rows never reserve or collide. Evaluated inside the activating UPDATE, so the
+ * check and the status change happen atomically under SQLite's single writer.
+ */
+const COMPLETED_IDENTIFIER_CONFLICT_SQL = `EXISTS (
+  SELECT 1
+    FROM line_items mine
+    JOIN line_items other
+      ON other.id != mine.id
+     AND other.type = 'completed'
+     AND ((mine.vin8 != '' AND other.vin8 = mine.vin8)
+       OR (mine.inspection_number != '' AND other.inspection_number = mine.inspection_number))
+    JOIN invoices owner ON owner.id = other.invoice_id
+   WHERE mine.invoice_id = ?
+     AND mine.type = 'completed'
+     AND (owner.status = 'finalized' OR owner.id = mine.invoice_id))`;
+
+/**
+ * Re-read the invoice's rows and the billed history and describe the first VIN /
+ * inspection # conflict, or null. Used to explain an atomic guard rejection.
+ */
+async function currentIdentifierConflict(db: Db, invoiceId: number): Promise<string | null> {
+  const lines = await db.select<IdentifiedLine>(
+    `SELECT type, inspection_number AS inspectionNumber, vin8
+       FROM line_items WHERE invoice_id = ? ORDER BY position, id`,
+    [invoiceId],
+  );
+  return completedIdentifierConflict(lines, await loadBilledHistory(db));
+}
+
+/** Like `currentIdentifierConflict`, but a failed re-read never hides the original error. */
+async function explainIdentifierConflict(db: Db, invoiceId: number): Promise<string | null> {
+  try {
+    return await currentIdentifierConflict(db, invoiceId);
+  } catch {
+    return null;
+  }
+}
+
 async function remainsSameDraft(
   db: Db,
   invoiceId: number,
@@ -246,11 +293,15 @@ async function remainsSameDraft(
 /**
  * Finalize a draft: allocate its seq, freeze the full snapshot + totals, set
  * status. One transaction. Returns the snapshot.
+ *
+ * Each completed row's VIN and inspection # must be unused by every other completed row
+ * on this invoice and on active invoices. That is checked against fresh data first and
+ * enforced again inside the atomic UPDATE, so a racing finalize or restore can't slip in.
  */
 export async function finalizeInvoice(db: Db, invoiceId: number): Promise<FinalizedSnapshot> {
   const { draft, draftRevision } = await loadDraftWithRevision(db, invoiceId);
   const normalizedDraft = { ...draft, year: deriveInvoiceYear(draft.issueDate, draft.year) };
-  const blockers = invoiceFinalizeBlockers(normalizedDraft);
+  const blockers = invoiceFinalizeBlockers(normalizedDraft, await loadBilledHistory(db));
   if (blockers.length) throw new Error(blockers[0].message);
 
   const settings = await getSettings(db);
@@ -306,23 +357,28 @@ export async function finalizeInvoice(db: Db, invoiceId: number): Promise<Finali
                   AND NOT EXISTS (
                     SELECT 1 FROM invoices other
                     WHERE other.year = ? AND other.seq = ? AND other.id != ?
-                  )`,
+                  )
+                  AND NOT ${COMPLETED_IDENTIFIER_CONFLICT_SQL}`,
           params: [
             seq, normalizedDraft.year, snapshot.issueDate,
             snapshot.totals.subtotalCents, snapshot.totals.taxCents, snapshot.totals.totalCents,
             JSON.stringify(snapshot), invoiceId, draftRevision,
             normalizedDraft.year, seq, invoiceId,
+            invoiceId,
           ],
           expectedRowsAffected: 1,
         },
       ]);
       return snapshot;
     } catch (error) {
-      const canRetry = automatic
-        && attempt + 1 < attemptLimit
-        && isAffectedRowConflict(error)
-        && await remainsSameDraft(db, invoiceId, draftRevision);
-      if (!canRetry) throw error;
+      // A changed draft keeps the stale-revision error; any other SQL error is not relabelled.
+      if (!isAffectedRowConflict(error) || !(await remainsSameDraft(db, invoiceId, draftRevision))) {
+        throw error;
+      }
+      // A VIN / inspection # billed meanwhile: retrying with another number can't help.
+      const conflict = await explainIdentifierConflict(db, invoiceId);
+      if (conflict) throw new Error(conflict);
+      if (!automatic || attempt + 1 >= attemptLimit) throw error;
     }
   }
 
@@ -439,23 +495,23 @@ export async function searchInvoices(db: Db, query: string): Promise<InvoiceList
   return rows.map(toInvoiceListItem);
 }
 
-export interface BilledHistory {
-  /** vin8 -> the invoice number it was already billed on */
-  vins: Record<string, string>;
-  /** inspection # -> the invoice number it was already billed on */
-  inspections: Record<string, string>;
-}
+/** vin8 / inspection # -> the invoice number a completed row was already billed on. */
+export type BilledHistory = BilledIdentifiers;
 
-/** Every VIN / inspection # already on a FINALIZED invoice, for the double-billing guard. */
+/**
+ * Every VIN / inspection # on a COMPLETED row of a FINALIZED invoice, for the
+ * double-billing guard. No-shows are excluded: they never reserve an identifier.
+ */
 export async function loadBilledHistory(db: Db): Promise<BilledHistory> {
   const rows = await db.select<{ vin8: string; inspection_number: string; year: number; seq: number }>(
     `SELECT li.vin8, li.inspection_number, i.year, i.seq
        FROM line_items li JOIN invoices i ON i.id = li.invoice_id
-      WHERE i.status = 'finalized'
+      WHERE i.status = 'finalized' AND li.type = 'completed'
       ORDER BY i.year, i.seq`,
   );
-  const vins: Record<string, string> = {};
-  const inspections: Record<string, string> = {};
+  // Null-prototype maps keep identifiers such as "__proto__" as real entries.
+  const vins: Record<string, string> = Object.create(null);
+  const inspections: Record<string, string> = Object.create(null);
   for (const r of rows) {
     const num = `${r.seq}-${r.year}`;
     if (r.vin8) vins[r.vin8] = num;
@@ -644,9 +700,45 @@ export async function listVoided(db: Db): Promise<InvoiceListItem[]> {
   return rows.map(toInvoiceListItem);
 }
 
-/** Restore a cancelled invoice back to finalized (keeps its original number + snapshot). */
+/**
+ * Why a cancelled invoice can't be made active again right now, or null. Restore checks
+ * only that it is cancelled and its completed VINs / inspection #s are unused; it never
+ * applies newer finalize requirements to an older invoice's frozen rows.
+ */
+async function restoreRejection(db: Db, id: number): Promise<string | null> {
+  const status = await getInvoiceStatus(db, id);
+  if (status === null) return 'This invoice no longer exists.';
+  if (status !== 'void') return 'Only cancelled invoices can be restored.';
+  const conflict = await currentIdentifierConflict(db, id);
+  return conflict ? `Can't restore this invoice: ${conflict}` : null;
+}
+
+/**
+ * Restore a cancelled invoice back to finalized (keeps its original number + snapshot).
+ * Throws, changing nothing, when it isn't cancelled or a completed row's VIN / inspection #
+ * is now billed on an active invoice or repeated within it.
+ */
 export async function unvoidInvoice(db: Db, id: number): Promise<void> {
-  await db.execute("UPDATE invoices SET status = 'finalized' WHERE id = ? AND status = 'void'", [id]);
+  const rejection = await restoreRejection(db, id);
+  if (rejection) throw new Error(rejection);
+  try {
+    await executeStatementsAtomically(db, [{
+      sql: `UPDATE invoices SET status = 'finalized'
+             WHERE id = ? AND status = 'void'
+               AND NOT ${COMPLETED_IDENTIFIER_CONFLICT_SQL}`,
+      params: [id, id],
+      expectedRowsAffected: 1,
+    }]);
+  } catch (error) {
+    if (!isAffectedRowConflict(error)) throw error;
+    let raced: string | null = null;
+    try {
+      raced = await restoreRejection(db, id);
+    } catch {
+      // Keep the original failure if the explanation can't be read.
+    }
+    throw raced ? new Error(raced) : error;
+  }
 }
 
 /** An invoice's status ('draft' | 'finalized' | 'void'), or null if it doesn't exist. */

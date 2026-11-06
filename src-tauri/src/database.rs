@@ -92,9 +92,11 @@ pub async fn execute_sqlite_transaction(
 
 #[cfg(test)]
 mod tests {
-    use super::{execute_statements, SqlStatement};
+    use super::{execute_statements, SqlStatement, SqlStatementResult};
+    use serde::Deserialize;
     use serde_json::json;
     use sqlx::{Row, SqlitePool};
+    use std::time::{Duration, Instant};
 
     /// The app's migrations, embedded at compile time from their TypeScript
     /// source of truth so native-SQLite tests run exactly the statements that ship.
@@ -777,5 +779,224 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(version, 6);
+    }
+
+    /// Finalize and restore batches captured from the TypeScript repository by
+    /// `src/lib/db/identifierGuardNativeFixture.test.ts`. Every batch was computed from
+    /// the same seeded state, in which every precheck passed, so running two of them
+    /// reproduces writers racing past their prechecks.
+    const IDENTIFIER_GUARD_FIXTURE: &str =
+        include_str!("../test-fixtures/identifier-guard-batches.json");
+
+    /// How a batch rejected by an activating UPDATE's guard is reported.
+    const GUARD_REJECTION: &str = "Expected 1 row(s) affected; affected 0.";
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct GuardInvoiceIds {
+        /// Cancelled; completed row R-100 / RACEVIN1; holds number 1-2026.
+        cancelled: i64,
+        /// Draft, automatic number 6-2026 (drafts already hold 4 and 5); completed row
+        /// R-200 / RACEVIN1.
+        completed_a: i64,
+        /// Draft, automatic 2027 number; completed row R-300 / RACEVIN1.
+        completed_b: i64,
+        /// Draft, manual number 4-2026; completed row R-100 / OTHERVN1.
+        inspection_c: i64,
+        /// Draft, manual number 5-2026; no-show row R-100 / RACEVIN1.
+        no_show: i64,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct IdentifierGuardFixture {
+        ids: GuardInvoiceIds,
+        seed: Vec<SqlStatement>,
+        finalize_a: Vec<SqlStatement>,
+        finalize_b: Vec<SqlStatement>,
+        finalize_c: Vec<SqlStatement>,
+        finalize_no_show: Vec<SqlStatement>,
+        restore_cancelled: Vec<SqlStatement>,
+    }
+
+    /// The fixture's rows on a database built from every shipped migration.
+    async fn identifier_guard_database(pool: &SqlitePool) -> IdentifierGuardFixture {
+        let mut fixture: IdentifierGuardFixture =
+            serde_json::from_str(IDENTIFIER_GUARD_FIXTURE).expect("valid identifier fixture");
+        for (version, _) in shipped_migrations() {
+            execute_statements(pool, shipped_migration_batch(version))
+                .await
+                .unwrap();
+        }
+        execute_statements(pool, std::mem::take(&mut fixture.seed))
+            .await
+            .unwrap();
+        fixture
+    }
+
+    /// `(status, seq, has a snapshot)` for one invoice.
+    async fn invoice_state(pool: &SqlitePool, id: i64) -> (String, Option<i64>, bool) {
+        sqlx::query_as("SELECT status, seq, snapshot_json IS NOT NULL FROM invoices WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn year_counters(pool: &SqlitePool) -> Vec<(i64, i64)> {
+        sqlx::query_as("SELECT year, last_seq FROM year_counters ORDER BY year")
+            .fetch_all(pool)
+            .await
+            .unwrap()
+    }
+
+    fn draft(seq: Option<i64>) -> (String, Option<i64>, bool) {
+        ("draft".into(), seq, false)
+    }
+
+    fn active(seq: i64) -> (String, Option<i64>, bool) {
+        ("finalized".into(), Some(seq), true)
+    }
+
+    /// Runs two batches as concurrent writers on their own pooled connections. Another
+    /// connection holds SQLite's write lock until both have started, so both queue on the
+    /// same lock; returns each result in argument order.
+    async fn contend(
+        pool: &SqlitePool,
+        first: Vec<SqlStatement>,
+        second: Vec<SqlStatement>,
+    ) -> [Result<Vec<SqlStatementResult>, String>; 2] {
+        let mut holder = pool.acquire().await.unwrap();
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut *holder)
+            .await
+            .unwrap();
+        let writer = |batch: Vec<SqlStatement>| {
+            let pool = pool.clone();
+            tauri::async_runtime::spawn(async move {
+                let started = Instant::now();
+                let result = execute_statements(&pool, batch).await;
+                (started, Instant::now(), result)
+            })
+        };
+        let writers = [writer(first), writer(second)];
+        // Far below the 5 s busy timeout, so both writers stay queued on the lock.
+        tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(250)))
+            .await
+            .unwrap();
+        let released = Instant::now();
+        sqlx::query("COMMIT").execute(&mut *holder).await.unwrap();
+
+        let mut results = Vec::with_capacity(2);
+        for writer in writers {
+            let (started, finished, result) = writer.await.unwrap();
+            assert!(
+                started < released && finished > released,
+                "each writer must have waited on the held write lock"
+            );
+            results.push(result);
+        }
+        results.try_into().expect("two writer results")
+    }
+
+    #[sqlx::test]
+    async fn replayed_batches_bill_each_completed_identifier_once(pool: SqlitePool) {
+        let IdentifierGuardFixture {
+            ids,
+            finalize_a,
+            finalize_b,
+            finalize_c,
+            finalize_no_show,
+            restore_cancelled,
+            ..
+        } = identifier_guard_database(&pool).await;
+
+        execute_statements(&pool, finalize_a).await.unwrap();
+        assert_eq!(invoice_state(&pool, ids.completed_a).await, active(6));
+
+        // Same VIN in another year: the guard rejects it and its 2027 reservation rolls back.
+        assert_eq!(
+            execute_statements(&pool, finalize_b).await.unwrap_err(),
+            GUARD_REJECTION
+        );
+        assert_eq!(invoice_state(&pool, ids.completed_b).await, draft(None));
+        assert_eq!(year_counters(&pool).await, [(2026, 6)]);
+
+        assert_eq!(
+            execute_statements(&pool, restore_cancelled)
+                .await
+                .unwrap_err(),
+            GUARD_REJECTION
+        );
+        assert_eq!(
+            invoice_state(&pool, ids.cancelled).await,
+            ("void".into(), Some(1), true)
+        );
+
+        // A no-show never reserves or collides, even with a billed VIN and inspection #.
+        execute_statements(&pool, finalize_no_show).await.unwrap();
+        assert_eq!(invoice_state(&pool, ids.no_show).await, active(5));
+        // R-100 is otherwise only on the cancelled invoice and the no-show.
+        execute_statements(&pool, finalize_c).await.unwrap();
+        assert_eq!(invoice_state(&pool, ids.inspection_c).await, active(4));
+        assert_eq!(year_counters(&pool).await, [(2026, 6)]);
+    }
+
+    #[sqlx::test]
+    async fn contending_finalizations_of_one_vin_commit_exactly_one(pool: SqlitePool) {
+        let IdentifierGuardFixture {
+            ids,
+            finalize_a,
+            finalize_b,
+            ..
+        } = identifier_guard_database(&pool).await;
+
+        let [a, b] = contend(&pool, finalize_a, finalize_b).await;
+
+        assert_ne!(a.is_ok(), b.is_ok(), "exactly one finalization commits");
+        if a.is_ok() {
+            assert_eq!(b.unwrap_err(), GUARD_REJECTION);
+            assert_eq!(invoice_state(&pool, ids.completed_a).await, active(6));
+            assert_eq!(invoice_state(&pool, ids.completed_b).await, draft(None));
+            assert_eq!(year_counters(&pool).await, [(2026, 6)]);
+        } else {
+            assert_eq!(a.unwrap_err(), GUARD_REJECTION);
+            assert_eq!(invoice_state(&pool, ids.completed_a).await, draft(None));
+            assert_eq!(invoice_state(&pool, ids.completed_b).await, active(1));
+            assert_eq!(year_counters(&pool).await, [(2026, 1), (2027, 1)]);
+        }
+    }
+
+    #[sqlx::test]
+    async fn contending_restore_and_finalize_of_one_inspection_commit_exactly_one(
+        pool: SqlitePool,
+    ) {
+        let IdentifierGuardFixture {
+            ids,
+            finalize_c,
+            finalize_no_show,
+            restore_cancelled,
+            ..
+        } = identifier_guard_database(&pool).await;
+
+        let [restored, finalized] = contend(&pool, restore_cancelled, finalize_c).await;
+
+        assert_ne!(restored.is_ok(), finalized.is_ok(), "exactly one commits");
+        if restored.is_ok() {
+            assert_eq!(finalized.unwrap_err(), GUARD_REJECTION);
+            assert_eq!(invoice_state(&pool, ids.cancelled).await, active(1));
+            assert_eq!(invoice_state(&pool, ids.inspection_c).await, draft(Some(4)));
+            assert_eq!(year_counters(&pool).await, [(2026, 1)]);
+        } else {
+            assert_eq!(restored.unwrap_err(), GUARD_REJECTION);
+            assert_eq!(
+                invoice_state(&pool, ids.cancelled).await,
+                ("void".into(), Some(1), true)
+            );
+            assert_eq!(invoice_state(&pool, ids.inspection_c).await, active(4));
+            assert_eq!(year_counters(&pool).await, [(2026, 4)]);
+        }
+        execute_statements(&pool, finalize_no_show).await.unwrap();
+        assert_eq!(invoice_state(&pool, ids.no_show).await, active(5));
     }
 }

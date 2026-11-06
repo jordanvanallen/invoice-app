@@ -94,15 +94,19 @@ In the **Completed Inspections** section, click **+ Add inspection** to add a ro
 
 Press **Enter** on the Fee box to quickly start the next row. To remove a row, click the **✕**. Removed a row by accident? An **Undo** appears.
 
+Each VIN and each inspection # can be billed as a **completed** inspection only once — once on this invoice and once across all your locked invoices, in any year. If one repeats, the row shows a note saying where, and **Lock & Save** stays off until you fix it. Your draft still saves while you sort it out.
+
 **4c. Add no‑shows**
 The **No‑Shows** section works the same way (default $25 each), including optional mileage. Any mileage charge requires the same **Approved by** and **Approval date** details described below.
+
+A no‑show gets rescheduled, so it never uses up a VIN or inspection #: the same vehicle can be a no‑show as many times as needed, on the same invoice as its completed inspection, or even after it was completed.
 
 **Put rows in date order**
 
 Rows stay exactly where they are while you type. When you are ready, click **Sort rows by date, then inspection #** to arrange Completed Inspections and No-Shows separately from oldest to newest; rows from the same day are ordered by inspection number. Opening Preview also sorts the visible rows first, so closing Preview returns to the same order you reviewed. Lock & Save uses this order automatically.
 
 **4d. Watch the totals**
-The bar at the bottom always shows **Subtotal**, **HST**, and **Total** as you go. A note like “Date is outside the billing period” is just a friendly heads‑up — it does **not** stop you from saving.
+The bar at the bottom always shows **Subtotal**, **HST**, and **Total** as you go. A note like “Date is outside the billing period” is just a friendly heads‑up — it does **not** stop you from saving. (A repeated VIN or inspection # on a completed row is different: see 4b.)
 
 ---
 
@@ -166,7 +170,7 @@ Open **Invoices → History** to see every finalized invoice, grouped by year.
 
 - **View an invoice:** click its **number** (e.g. `#3‑2026`) or the **View** button.
 - **Download PDF again:** click **Download PDF** on any row.
-- **Duplicate:** click **Duplicate** to start a new invoice pre‑filled from an old one.
+- **Duplicate:** click **Duplicate** to start a new invoice pre‑filled from an old one. Change the VIN and inspection # on its completed rows before locking it, since each can be billed only once.
 - **Tax summary for a year:** each year has **Export tax summary**.
 - **Tax summary for a date range:** use the **From / To** date boxes at the top and click **Export** — handy for quarterly or custom periods.
 
@@ -185,6 +189,8 @@ To bring one back:
 2. The cancelled list opens — click **Restore** on the one you want. It returns to your History and totals.
 
 Cancelled invoices stay in your records and don’t count toward income or HST until restored.
+
+Cancelling an invoice frees its completed VINs and inspection #s so you can bill them on another invoice. **Restore** checks them again: if one is now on another locked invoice (or appears twice on the cancelled one), Restore explains which and leaves the invoice cancelled. Cancel the other invoice first if this is the one to keep.
 
 ---
 
@@ -237,6 +243,7 @@ And in **Settings → Backups**: where backups are saved, **Back up now**, and *
 | **Mac says v0.3.2 is damaged** | Download the v0.3.3 or newer universal DMG from the official Releases page and replace the old app using **Stage 1 → macOS**. |
 | **My PDF didn’t appear** | Check the folder shown in the save message, or **Settings → General → Where PDFs are saved → Open this folder**. |
 | **“Date is outside the billing period” warning** | Just informational — it won’t stop you saving or finalizing. |
+| **Lock & Save says a VIN or inspection # was already billed** | Each completed inspection can be billed once. The note names the invoice that has it; fix the row, or cancel that invoice first if it was the mistake. No‑shows never cause this. |
 | **I cancelled an invoice by accident** | **Invoices → History** → red **Cancelled invoices** button → **Restore**. |
 | **I cancelled an expense report by accident** | **Expenses → History** → **Cancelled expense reports** → **Restore**. |
 | **I cancelled a mileage report by accident** | **Car Mileage → History** → find it among the cancelled mileage reports → **Restore**. |

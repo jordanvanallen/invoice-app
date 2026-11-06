@@ -7,6 +7,7 @@
   import { saveInvoicePdf } from '$lib/pdf/generate';
   import { defaultInvoicePeriod } from '$lib/ui/date';
   import { showSaveToast } from '$lib/stores/toast';
+  import { runThenLeave } from '$lib/ui/invoiceDetailActions';
   import InvoiceView from '$lib/components/InvoiceView.svelte';
   import BigButton from '$lib/components/BigButton.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -15,6 +16,8 @@
   let snap = $state<FinalizedSnapshot | null>(null);
   let status = $state<string | null>(null);
   let errorMsg = $state('');
+  let actionError = $state('');
+  let restoring = $state(false);
   let showCancel = $state(false);
   let showDelete = $state(false);
   const id = $derived(Number($page.params.id));
@@ -45,9 +48,16 @@
     await goto('/history');
   }
 
+  // A refused restore (e.g. its VIN is billed on another active invoice) keeps this page as is.
   async function restore() {
-    await unvoidInvoice(await getDb(), id);
-    await goto('/history');
+    if (restoring) return;
+    restoring = true;
+    actionError = '';
+    try {
+      actionError = await runThenLeave(async () => unvoidInvoice(await getDb(), id), () => goto('/history'));
+    } finally {
+      restoring = false;
+    }
   }
 
   async function deleteForever() {
@@ -64,13 +74,17 @@
     <BigButton variant="secondary" onclick={downloadPdf}>Download PDF</BigButton>
     <BigButton onclick={duplicate}>Duplicate</BigButton>
     {#if cancelled}
-      <BigButton variant="secondary" onclick={restore}>Restore</BigButton>
+      <BigButton variant="secondary" onclick={restore} disabled={restoring}>{restoring ? 'Restoring…' : 'Restore'}</BigButton>
       <BigButton variant="destructive" onclick={() => (showDelete = true)}>Delete permanently</BigButton>
     {:else}
       <BigButton variant="destructive" onclick={() => (showCancel = true)}>Cancel invoice</BigButton>
     {/if}
   {/if}
 </div>
+
+{#if actionError}
+  <p class="err action-err" role="alert">{actionError}</p>
+{/if}
 
 {#if showCancel && snap}
   <ConfirmDialog
@@ -110,4 +124,5 @@
   .bar { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-6); }
   .bar .sp { flex: 1; }
   .err { color: var(--red-600); }
+  .action-err { margin: 0 0 var(--sp-4); }
 </style>

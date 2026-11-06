@@ -48,7 +48,7 @@
   let clients = $state<CatalogEntry[]>([]);
   let locations = $state<CatalogEntry[]>([]);
   let approvers = $state<CatalogEntry[]>([]);
-  // VINs / inspection #s already on finalized invoices — for the double-billing guard.
+  // VINs / inspection #s on completed rows of finalized invoices — for the double-billing guard.
   let billed = $state<BilledHistory>({ vins: {}, inspections: {} });
 
   let invoiceId = $state<number | null>(null);
@@ -288,6 +288,7 @@
     };
   });
 
+  // Completed rows only: a no-show may repeat any VIN / inspection # (it gets rescheduled).
   const dups = $derived(findDuplicates([...completed, ...noshow]));
   const dupInspections = $derived(new Set(dups.inspectionNumbers));
   const dupVins = $derived(new Set(dups.vin8s));
@@ -318,7 +319,7 @@
   }
 
   const allLines = $derived([...completed, ...noshow]);
-  const finalizeBlockers = $derived(invoiceFinalizeBlockers(buildDraft()));
+  const finalizeBlockers = $derived(invoiceFinalizeBlockers(buildDraft(), billed));
   const issueDateBlocker = $derived(finalizeBlockers.find((blocker) => blocker.field === 'issueDate'));
   const blockedLineIndices = $derived(new Set(
     finalizeBlockers.flatMap((blocker) => blocker.lineIndex === null ? [] : [blocker.lineIndex]),
@@ -373,8 +374,18 @@
       void backupNow();
     } catch (e) {
       finalizeError = (e as Error).message;
+      // Lock & Save rechecks the database; show any VIN / inspection # billed meanwhile.
+      void refreshBilledHistory();
     } finally {
       finalizeSaving = false;
+    }
+  }
+
+  async function refreshBilledHistory() {
+    try {
+      billed = await loadBilledHistory(await getDb());
+    } catch {
+      // Keep the last known history; Lock & Save checks the database again anyway.
     }
   }
 

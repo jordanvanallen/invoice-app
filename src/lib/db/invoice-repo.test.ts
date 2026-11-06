@@ -37,6 +37,14 @@ function line(over: Partial<LineItem> = {}): LineItem {
   };
 }
 
+/**
+ * Distinct completed-row identifiers for an unrelated fixture invoice. Each call site
+ * passes its own distinct label (its issue date), so intentional collisions stay explicit.
+ */
+function unrelatedIds(label: string): Pick<LineItem, 'inspectionNumber' | 'vin8'> {
+  return { inspectionNumber: `INS-${label}`, vin8: label.replace(/[^0-9A-Za-z]/g, '').slice(-8).toUpperCase() };
+}
+
 describe('invoice draft repo', () => {
   test('create then load returns an empty draft with the given header', async () => {
     const db = await freshDb();
@@ -676,11 +684,11 @@ describe('finalize + reprint', () => {
       periodStart: '2026-07-01',
       periodEnd: '2026-07-14',
       lines: [
-        line({ inspectionNumber: 'completed-10', date: '2026-07-14', position: 0 }),
+        line({ inspectionNumber: 'completed-10', vin8: 'ORDER010', date: '2026-07-14', position: 0 }),
         line({ type: 'noshow', inspectionNumber: 'noshow-new', date: '2026-07-13', position: 1 }),
-        line({ inspectionNumber: 'completed-old', date: '2026-07-01', position: 2 }),
+        line({ inspectionNumber: 'completed-old', vin8: 'ORDEROLD', date: '2026-07-01', position: 2 }),
         line({ type: 'noshow', inspectionNumber: 'noshow-old', date: '2026-07-02', position: 3 }),
-        line({ inspectionNumber: 'completed-2', date: '2026-07-14', position: 4 }),
+        line({ inspectionNumber: 'completed-2', vin8: 'ORDER002', date: '2026-07-14', position: 4 }),
       ],
     });
 
@@ -865,7 +873,7 @@ describe('by-year views', () => {
     const id = await createDraft(db, { year: Number(issueDate.slice(0, 4)), issueDate, periodStart: issueDate, periodEnd: issueDate });
     await saveDraft(db, id, {
       year: Number(issueDate.slice(0, 4)), issueDate, periodStart: issueDate, periodEnd: issueDate,
-      lines: [line()],
+      lines: [line(unrelatedIds(issueDate))],
     });
     return finalizeInvoice(db, id);
   }
@@ -1202,14 +1210,17 @@ describe('yearClientBreakdown', () => {
       await finalizeInvoice(db, id);
     }
     await inv('2026-05-28', [
-      line({ clientId: gm, clientName: 'Globex Finance', feeCents: 3800 }),
+      line({ clientId: gm, clientName: 'Globex Finance', feeCents: 3800, inspectionNumber: 'GLOBEX-1', vin8: 'GLOBEX01' }),
       line({
         clientId: gm, clientName: 'Globex Finance', feeCents: 3800, mileageCents: 200,
+        inspectionNumber: 'GLOBEX-2', vin8: 'GLOBEX02',
         mileageApproverId: approverId, mileageApproverName: 'Jordan Lee',
         mileageApprovalDate: '2026-05-27',
       }),
     ]);
-    await inv('2026-06-10', [line({ clientId: honda, clientName: 'Summit Motors', feeCents: 3800 })]);
+    await inv('2026-06-10', [line({
+      clientId: honda, clientName: 'Summit Motors', feeCents: 3800, inspectionNumber: 'SUMMIT-1', vin8: 'SUMMIT01',
+    })]);
 
     const rows = await yearClientBreakdown(db, 2026);
     expect(rows).toEqual([
@@ -1224,7 +1235,7 @@ describe('range summary', () => {
   async function fin(db: Awaited<ReturnType<typeof freshDb>>, issueDate: string, clientName: string, feeCents: number) {
     const cid = await addEntry(db, 'clients', clientName);
     const id = await createDraft(db, { year: Number(issueDate.slice(0, 4)), issueDate, periodStart: issueDate, periodEnd: issueDate });
-    await saveDraft(db, id, { year: Number(issueDate.slice(0, 4)), issueDate, periodStart: issueDate, periodEnd: issueDate, lines: [line({ clientId: cid, clientName, feeCents })] });
+    await saveDraft(db, id, { year: Number(issueDate.slice(0, 4)), issueDate, periodStart: issueDate, periodEnd: issueDate, lines: [line({ clientId: cid, clientName, feeCents, ...unrelatedIds(issueDate) })] });
     await finalizeInvoice(db, id);
   }
   test('rollup + breakdown respect inclusive date bounds', async () => {
@@ -1251,7 +1262,7 @@ describe('range summary', () => {
     });
     await saveDraft(db, voidId, {
       year: 2026, issueDate: '2026-02-01', periodStart: '2026-02-01', periodEnd: '2026-02-01',
-      lines: [line({ clientName: 'Void Co' })],
+      lines: [line({ clientName: 'Void Co', ...unrelatedIds('2026-02-01') })],
     });
     await finalizeInvoice(db, voidId);
     await voidInvoice(db, voidId);
@@ -1286,7 +1297,7 @@ describe('fixed-query invoice history reads', () => {
     });
     await saveDraft(db, id, {
       year: Number(issueDate.slice(0, 4)), issueDate, periodStart: issueDate, periodEnd: issueDate,
-      lines: [line({ clientName })],
+      lines: [line({ clientName, ...unrelatedIds(issueDate) })],
     });
     if (status !== 'draft') await finalizeInvoice(db, id);
     if (status === 'void') await voidInvoice(db, id);
@@ -1459,5 +1470,370 @@ describe('getInvoiceStatus + deleteVoidedInvoice', () => {
     expect(await getInvoiceStatus(db, id)).toBeNull();
     const [{ c }] = await db.select<{ c: number }>('SELECT COUNT(*) AS c FROM line_items WHERE invoice_id = ?', [id]);
     expect(c).toBe(0);
+  });
+});
+
+describe('completed-only VIN / inspection # uniqueness', () => {
+  function completed(inspectionNumber: string, vin8: string): LineItem {
+    return line({ inspectionNumber, vin8 });
+  }
+
+  function noShow(inspectionNumber: string, vin8: string): LineItem {
+    return line({ type: 'noshow', inspectionNumber, vin8, feeCents: 2500 });
+  }
+
+  async function draftWith(
+    db: Db,
+    issueDate: string,
+    lines: LineItem[],
+    seq: number | null = null,
+  ): Promise<number> {
+    const year = Number(issueDate.slice(0, 4));
+    const header = { year, issueDate, periodStart: issueDate, periodEnd: issueDate };
+    const id = await createDraft(db, header);
+    await saveDraft(db, id, { ...header, seq, lines: lines.map((row, position) => ({ ...row, position })) });
+    return id;
+  }
+
+  async function finalizedWith(db: Db, issueDate: string, lines: LineItem[]) {
+    const id = await draftWith(db, issueDate, lines);
+    return { id, snapshot: await finalizeInvoice(db, id) };
+  }
+
+  async function replaceLines(db: Db, id: number, lines: LineItem[]): Promise<void> {
+    const draft = await loadDraft(db, id);
+    await saveDraft(db, id, { ...draft, lines: lines.map((row, position) => ({ ...row, position })) });
+  }
+
+  /** Every row a finalize or restore could write, to prove a rejection changed nothing. */
+  async function persistedState(db: Db) {
+    return {
+      invoices: await db.select('SELECT * FROM invoices ORDER BY id'),
+      lines: await db.select('SELECT * FROM line_items ORDER BY id'),
+      counters: await db.select('SELECT * FROM year_counters ORDER BY year'),
+    };
+  }
+
+  /** Runs `beforeFirstBatch` on the real database after prechecks, just before the atomic write. */
+  function racing(db: Db, beforeFirstBatch: () => Promise<void>) {
+    let batches = 0;
+    const racingDb: Db = {
+      execute: (sql, params) => db.execute(sql, params),
+      select: db.select.bind(db),
+      executeTransaction: async (statements) => {
+        batches += 1;
+        if (batches === 1) await beforeFirstBatch();
+        return executeStatementsAtomically(db, statements);
+      },
+    };
+    return { db: racingDb, batches: () => batches };
+  }
+
+  /** A pre-rule invoice row set written directly, as older app versions could have stored it. */
+  async function insertLegacyInvoice(
+    db: Db,
+    invoice: { id: number; seq: number; status: 'finalized' | 'void'; rows: Array<[LineItem['type'], string, string]> },
+  ): Promise<void> {
+    await db.execute(
+      `INSERT INTO invoices
+         (id, year, seq, status, issue_date, period_start, period_end, finalized_at, total_cents, snapshot_json)
+       VALUES (?, 2025, ?, ?, '2025-06-02', '2025-06-01', '2025-06-01', '2025-06-02', 4294, ?)`,
+      [invoice.id, invoice.seq, invoice.status, JSON.stringify({ invoiceNumber: `${invoice.seq}-2025`, legacy: true })],
+    );
+    for (const [type, inspectionNumber, vin8] of invoice.rows) {
+      // Same position on purpose: row identity is the line item id, never its position.
+      await db.execute(
+        `INSERT INTO line_items (invoice_id, type, position, inspection_number, vin8, fee_cents)
+         VALUES (?, ?, 0, ?, ?, 3800)`,
+        [invoice.id, type, inspectionNumber, vin8],
+      );
+    }
+  }
+
+  test('rejects a completed VIN billed on an active invoice from another year and changes nothing', async () => {
+    const db = await freshDb();
+    await finalizedWith(db, '2025-12-29', [completed('100', 'SAMEVIN1')]);
+    const id = await draftWith(db, '2026-01-05', [completed('200', 'SAMEVIN1')]);
+    const before = await persistedState(db);
+
+    await expect(finalizeInvoice(db, id)).rejects.toThrow('VIN SAMEVIN1 was already billed on invoice #1-2025.');
+
+    expect(await persistedState(db)).toEqual(before);
+    await replaceLines(db, id, [completed('200', 'NEWVIN02')]);
+    expect((await finalizeInvoice(db, id)).invoiceNumber).toBe('1-2026');
+  });
+
+  test.each([
+    { kind: 'automatic', seq: null, nextNumber: '2-2026' },
+    { kind: 'manual', seq: 7, nextNumber: '7-2026' },
+  ])('rejects a $kind finalization reusing only an inspection # and keeps its sequence', async ({ seq, nextNumber }) => {
+    const db = await freshDb();
+    await finalizedWith(db, '2026-01-05', [completed('300', 'FIRSTVN1')]);
+    const id = await draftWith(db, '2026-01-12', [completed('300', 'OTHERVN1')], seq);
+    const before = await persistedState(db);
+
+    await expect(finalizeInvoice(db, id)).rejects.toThrow('Inspection #300 was already billed on invoice #1-2026.');
+
+    expect(await persistedState(db)).toEqual(before);
+    await replaceLines(db, id, [completed('301', 'OTHERVN1')]);
+    expect((await finalizeInvoice(db, id)).invoiceNumber).toBe(nextNumber);
+  });
+
+  test('saves duplicate completed rows in a draft but blocks them at Lock & Save', async () => {
+    const db = await freshDb();
+    const id = await draftWith(db, '2026-01-12', [completed('400', 'TWICEVN1'), completed('401', 'TWICEVN1')]);
+    expect((await loadDraft(db, id)).lines.map((row) => row.vin8)).toEqual(['TWICEVN1', 'TWICEVN1']);
+    const before = await persistedState(db);
+
+    await expect(finalizeInvoice(db, id)).rejects.toThrow('VIN TWICEVN1 is on more than one completed row.');
+
+    expect(await persistedState(db)).toEqual(before);
+  });
+
+  test('lets no-shows repeat freely before, beside, and after the one completed inspection', async () => {
+    const db = await freshDb();
+    // Repeated within one invoice, then across invoices, while the vehicle is rescheduled.
+    await finalizedWith(db, '2025-11-03', [noShow('500', 'RESCHED1'), noShow('500', 'RESCHED1')]);
+    await finalizedWith(db, '2025-11-10', [noShow('500', 'RESCHED1')]);
+    // The completion may share an invoice with another no-show of the same vehicle.
+    const done = await finalizedWith(db, '2026-01-12', [completed('500', 'RESCHED1'), noShow('500', 'RESCHED1')]);
+    // A later no-show is still allowed after the completion.
+    await finalizedWith(db, '2026-02-02', [noShow('500', 'RESCHED1')]);
+    expect(done.snapshot.invoiceNumber).toBe('1-2026');
+
+    const again = await draftWith(db, '2026-03-02', [completed('500', 'RESCHED1')]);
+    await expect(finalizeInvoice(db, again)).rejects.toThrow('Inspection #500 was already billed on invoice #1-2026.');
+  });
+
+  test('cancelling frees identifiers, and restore refuses to bill them twice', async () => {
+    const db = await freshDb();
+    const original = await finalizedWith(db, '2026-03-02', [completed('600', 'VOIDVIN1')]);
+    await voidInvoice(db, original.id);
+    const replacement = await finalizedWith(db, '2026-03-09', [completed('600', 'VOIDVIN1')]);
+    expect(replacement.snapshot.invoiceNumber).toBe('2-2026');
+    const before = await persistedState(db);
+
+    await expect(unvoidInvoice(db, original.id)).rejects.toThrow(
+      "Can't restore this invoice: Inspection #600 was already billed on invoice #2-2026.",
+    );
+
+    expect(await persistedState(db)).toEqual(before);
+    expect(await reprintSnapshot(db, original.id)).toEqual(original.snapshot);
+    await voidInvoice(db, replacement.id);
+    await unvoidInvoice(db, original.id);
+    expect(await getInvoiceStatus(db, original.id)).toBe('finalized');
+  });
+
+  test('refuses to restore a legacy cancelled invoice with duplicate completed rows', async () => {
+    const db = await freshDb();
+    await insertLegacyInvoice(db, {
+      id: 50, seq: 4, status: 'void',
+      rows: [['completed', 'L-1', 'LEGACY01'], ['completed', 'L-2', 'LEGACY01']],
+    });
+    const before = await persistedState(db);
+
+    await expect(unvoidInvoice(db, 50)).rejects.toThrow(
+      "Can't restore this invoice: VIN LEGACY01 is on more than one completed row.",
+    );
+
+    expect(await persistedState(db)).toEqual(before);
+  });
+
+  test('restores legacy cancelled invoices without applying newer finalize requirements', async () => {
+    const db = await freshDb();
+    // No client, location, or date, and a no-show sharing the completed row's identifiers.
+    await insertLegacyInvoice(db, {
+      id: 51, seq: 5, status: 'void',
+      rows: [['completed', 'L-3', 'LEGACY03'], ['noshow', 'L-3', 'LEGACY03']],
+    });
+
+    await unvoidInvoice(db, 51);
+
+    expect(await getInvoiceStatus(db, 51)).toBe('finalized');
+    expect(await reprintSnapshot(db, 51)).toEqual({ invoiceNumber: '5-2025', legacy: true });
+  });
+
+  test('keeps unrelated legacy duplicates readable without letting them block new work', async () => {
+    const db = await freshDb();
+    await insertLegacyInvoice(db, { id: 60, seq: 1, status: 'finalized', rows: [['completed', 'OLD-1', 'OLDDUP01']] });
+    await insertLegacyInvoice(db, {
+      id: 61, seq: 2, status: 'finalized',
+      rows: [['completed', 'OLD-2', 'OLDDUP01'], ['completed', 'OLD-3', 'OLDDUP01']],
+    });
+    await insertLegacyInvoice(db, { id: 62, seq: 3, status: 'void', rows: [['completed', 'OLD-4', 'UNRELAT1']] });
+
+    expect((await listFinalizedInvoices(db)).map((invoice) => invoice.invoiceNumber)).toEqual(['1-2025', '2-2025']);
+    expect((await loadBilledHistory(db)).vins.OLDDUP01).toBe('2-2025');
+    const fresh = await finalizedWith(db, '2026-04-06', [completed('NEW-1', 'NEWVIN01')]);
+    expect(fresh.snapshot.invoiceNumber).toBe('1-2026');
+    await unvoidInvoice(db, 62);
+    expect(await getInvoiceStatus(db, 62)).toBe('finalized');
+
+    const reuse = await draftWith(db, '2026-04-13', [completed('NEW-2', 'OLDDUP01')]);
+    await expect(finalizeInvoice(db, reuse)).rejects.toThrow('VIN OLDDUP01 was already billed on invoice #2-2025.');
+  });
+
+  test.each([
+    { kind: 'automatic', seq: null, nextNumber: '1-2026' },
+    { kind: 'manual', seq: 7, nextNumber: '7-2026' },
+  ])('atomically rejects a $kind finalization raced by another invoice billing the same VIN', async ({ seq, nextNumber }) => {
+    const db = await freshDb();
+    const loser = await draftWith(db, '2026-04-06', [completed('701', 'RACEVIN1')], seq);
+    const winner = await draftWith(db, '2025-12-29', [completed('702', 'RACEVIN1')]);
+    let afterWinner: Awaited<ReturnType<typeof persistedState>> | null = null;
+    const race = racing(db, async () => {
+      await finalizeInvoice(db, winner);
+      afterWinner = await persistedState(db);
+    });
+
+    await expect(finalizeInvoice(race.db, loser)).rejects.toThrow('VIN RACEVIN1 was already billed on invoice #1-2025.');
+
+    expect(race.batches()).toBe(1);
+    expect(afterWinner).not.toBeNull();
+    expect(await persistedState(db)).toEqual(afterWinner);
+    await replaceLines(db, loser, [completed('701', 'FIXEDVN1')]);
+    expect((await finalizeInvoice(db, loser)).invoiceNumber).toBe(nextNumber);
+  });
+
+  test('atomically rejects a duplicate completed row that appears after the precheck', async () => {
+    const db = await freshDb();
+    const id = await draftWith(db, '2026-04-06', [completed('801', 'INNERVN1')]);
+    let afterInsert: Awaited<ReturnType<typeof persistedState>> | null = null;
+    const race = racing(db, async () => {
+      await db.execute(
+        `INSERT INTO line_items (invoice_id, type, position, inspection_number, vin8, fee_cents)
+         VALUES (?, 'completed', 0, '802', 'INNERVN1', 3800)`,
+        [id],
+      );
+      afterInsert = await persistedState(db);
+    });
+
+    await expect(finalizeInvoice(race.db, id)).rejects.toThrow('VIN INNERVN1 is on more than one completed row.');
+
+    expect(race.batches()).toBe(1);
+    expect(await persistedState(db)).toEqual(afterInsert);
+  });
+
+  test('atomically rejects a restore raced by a finalization of the same VIN', async () => {
+    const db = await freshDb();
+    const cancelled = await finalizedWith(db, '2026-04-06', [completed('901', 'CROSSVN1')]);
+    await voidInvoice(db, cancelled.id);
+    const draftId = await draftWith(db, '2026-04-13', [completed('902', 'CROSSVN1')]);
+    let afterFinalize: Awaited<ReturnType<typeof persistedState>> | null = null;
+    const race = racing(db, async () => {
+      await finalizeInvoice(db, draftId);
+      afterFinalize = await persistedState(db);
+    });
+
+    await expect(unvoidInvoice(race.db, cancelled.id)).rejects.toThrow(
+      "Can't restore this invoice: VIN CROSSVN1 was already billed on invoice #2-2026.",
+    );
+
+    expect(await persistedState(db)).toEqual(afterFinalize);
+    expect(await getInvoiceStatus(db, cancelled.id)).toBe('void');
+    expect(await reprintSnapshot(db, cancelled.id)).toEqual(cancelled.snapshot);
+  });
+
+  test('atomically rejects a finalization raced by a restore of the same VIN', async () => {
+    const db = await freshDb();
+    const cancelled = await finalizedWith(db, '2026-04-06', [completed('903', 'CROSSVN2')]);
+    await voidInvoice(db, cancelled.id);
+    const draftId = await draftWith(db, '2026-04-13', [completed('904', 'CROSSVN2')]);
+    let afterRestore: Awaited<ReturnType<typeof persistedState>> | null = null;
+    const race = racing(db, async () => {
+      await unvoidInvoice(db, cancelled.id);
+      afterRestore = await persistedState(db);
+    });
+
+    await expect(finalizeInvoice(race.db, draftId)).rejects.toThrow(
+      'VIN CROSSVN2 was already billed on invoice #1-2026.',
+    );
+
+    expect(race.batches()).toBe(1);
+    expect(await persistedState(db)).toEqual(afterRestore);
+    expect(await getInvoiceStatus(db, cancelled.id)).toBe('finalized');
+  });
+
+  test('atomically rejects a restore when a duplicate completed row appears after the precheck', async () => {
+    const db = await freshDb();
+    await insertLegacyInvoice(db, { id: 70, seq: 7, status: 'void', rows: [['completed', 'L-7', 'LEGACY07']] });
+    let afterInsert: Awaited<ReturnType<typeof persistedState>> | null = null;
+    const race = racing(db, async () => {
+      await db.execute(
+        `INSERT INTO line_items (invoice_id, type, position, inspection_number, vin8, fee_cents)
+         VALUES (70, 'completed', 0, 'L-7', 'LEGACY08', 3800)`,
+      );
+      afterInsert = await persistedState(db);
+    });
+
+    await expect(unvoidInvoice(race.db, 70)).rejects.toThrow(
+      "Can't restore this invoice: Inspection #L-7 is on more than one completed row.",
+    );
+
+    expect(await persistedState(db)).toEqual(afterInsert);
+  });
+
+  test('restore refuses invoices that are not cancelled instead of reporting success', async () => {
+    const db = await freshDb();
+    const active = await finalizedWith(db, '2026-04-06', [completed('A-1', 'ACTIVEV1')]);
+    const draftId = await draftWith(db, '2026-04-13', [completed('A-2', 'DRAFTVN1')]);
+    const before = await persistedState(db);
+
+    await expect(unvoidInvoice(db, active.id)).rejects.toThrow('Only cancelled invoices can be restored.');
+    await expect(unvoidInvoice(db, draftId)).rejects.toThrow('Only cancelled invoices can be restored.');
+    await expect(unvoidInvoice(db, 999)).rejects.toThrow('This invoice no longer exists.');
+
+    expect(await persistedState(db)).toEqual(before);
+  });
+
+  test('restore keeps an arbitrary SQL failure instead of relabelling it as a duplicate', async () => {
+    const db = await freshDb();
+    const cancelled = await finalizedWith(db, '2026-04-06', [completed('B-1', 'SQLFAIL1')]);
+    await voidInvoice(db, cancelled.id);
+    await db.execute(`CREATE TRIGGER fail_invoice_restore
+      BEFORE UPDATE ON invoices
+      WHEN NEW.status = 'finalized'
+      BEGIN
+        SELECT RAISE(FAIL, 'injected restore failure');
+      END`);
+
+    await expect(unvoidInvoice(db, cancelled.id)).rejects.toThrow(/injected restore failure/);
+
+    expect(await getInvoiceStatus(db, cancelled.id)).toBe('void');
+  });
+
+  test('duplicating and reprinting stay permissive while the copy must change its completed identifiers', async () => {
+    const db = await freshDb();
+    const source = await finalizedWith(db, '2026-04-06', [completed('C-1', 'COPYVIN1'), noShow('C-2', 'COPYVIN2')]);
+
+    const copyId = await duplicateInvoice(db, source.id, {
+      year: 2026, issueDate: '2026-04-13', periodStart: '2026-04-07', periodEnd: '2026-04-13',
+    });
+
+    expect((await loadDraft(db, copyId)).lines.map((row) => [row.type, row.inspectionNumber, row.vin8])).toEqual([
+      ['completed', 'C-1', 'COPYVIN1'],
+      ['noshow', 'C-2', 'COPYVIN2'],
+    ]);
+    await expect(finalizeInvoice(db, copyId)).rejects.toThrow('Inspection #C-1 was already billed on invoice #1-2026.');
+    expect(await reprintSnapshot(db, source.id)).toEqual(source.snapshot);
+    await replaceLines(db, copyId, [completed('C-3', 'COPYVIN3'), noShow('C-2', 'COPYVIN2')]);
+    expect((await finalizeInvoice(db, copyId)).invoiceNumber).toBe('2-2026');
+  });
+
+  test('billed history holds only completed rows, keyed safely for prototype-like identifiers', async () => {
+    const db = await freshDb();
+    await finalizedWith(db, '2026-05-04', [completed('__proto__', 'PROTO001'), noShow('NS-1', 'NOSHOW01')]);
+
+    const billed = await loadBilledHistory(db);
+
+    expect(Object.prototype.hasOwnProperty.call(billed.inspections, '__proto__')).toBe(true);
+    expect(billed.inspections['__proto__']).toBe('1-2026');
+    expect(billed.inspections['NS-1']).toBeUndefined();
+    expect(billed.vins['NOSHOW01']).toBeUndefined();
+    expect(billed.inspections['constructor']).toBeUndefined();
+    const inherited = await draftWith(db, '2026-05-11', [completed('constructor', 'PROTO002')]);
+    expect((await finalizeInvoice(db, inherited)).invoiceNumber).toBe('2-2026');
+    const reused = await draftWith(db, '2026-05-18', [completed('__proto__', 'PROTO003')]);
+    await expect(finalizeInvoice(db, reused)).rejects.toThrow('Inspection #__proto__ was already billed on invoice #1-2026.');
   });
 });

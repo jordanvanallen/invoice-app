@@ -1,10 +1,10 @@
 import { test, expect, describe } from 'vitest';
 import {
   normalizeVin8, isValidVin8, missingFinalizeFields,
-  invoiceFinalizeBlockers,
+  invoiceFinalizeBlockers, invoiceRowWarnings,
   findDuplicates, isValidIsoDate, formatIsoDate, isDateOutsidePeriod,
   isValidHstNumber, isValidEmail, isValidTaxPercent, isValidDollars,
-  businessFieldErrors, hasNoErrors, type BusinessFields,
+  businessFieldErrors, hasNoErrors, type BusinessFields, type BilledIdentifiers,
 } from './validation';
 import type { DraftInvoice, LineItem } from './types';
 
@@ -17,6 +17,8 @@ function line(over: Partial<LineItem> = {}): LineItem {
     ...over,
   };
 }
+
+const NO_HISTORY: BilledIdentifiers = { vins: {}, inspections: {} };
 
 function draft(lines: LineItem[]): DraftInvoice {
   return {
@@ -63,7 +65,7 @@ describe('invoiceFinalizeBlockers', () => {
     'requires a canonical invoice issue date before finalization: %s',
     (issueDate) => {
       const invalidDraft = { ...draft([line()]), issueDate };
-      expect(invoiceFinalizeBlockers(invalidDraft)).toContainEqual({
+      expect(invoiceFinalizeBlockers(invalidDraft, NO_HISTORY)).toContainEqual({
         lineIndex: null,
         field: 'issueDate',
         message: 'Choose a valid invoice date.',
@@ -77,11 +79,11 @@ describe('invoiceFinalizeBlockers', () => {
       mileageApproverId: null,
       mileageApproverName: '',
       mileageApprovalDate: '2026-02-30',
-    })]));
+    })]), NO_HISTORY);
     expect(blockers.map((blocker) => blocker.field)).toEqual([
       'mileageApprover', 'mileageApprovalDate',
     ]);
-    expect(invoiceFinalizeBlockers(draft([line({ mileageCents: 0 })]))).toEqual([]);
+    expect(invoiceFinalizeBlockers(draft([line({ mileageCents: 0 })]), NO_HISTORY)).toEqual([]);
   });
 
   test('validates non-zero mileage on both current line types', () => {
@@ -92,7 +94,7 @@ describe('invoiceFinalizeBlockers', () => {
       mileageApproverName: '',
       mileageApprovalDate: '',
     }));
-    expect(invoiceFinalizeBlockers(draft(lines)).map(({ lineIndex, field }) => ({
+    expect(invoiceFinalizeBlockers(draft(lines), NO_HISTORY).map(({ lineIndex, field }) => ({
       lineIndex, field,
     }))).toEqual([
       { lineIndex: 0, field: 'mileageApprover' },
@@ -103,7 +105,7 @@ describe('invoiceFinalizeBlockers', () => {
   });
 
   test('requires at least one invoice row', () => {
-    expect(invoiceFinalizeBlockers(draft([]))).toEqual([
+    expect(invoiceFinalizeBlockers(draft([]), NO_HISTORY)).toEqual([
       { lineIndex: null, field: 'invoice', message: 'Add at least one invoice row.' },
     ]);
   });
@@ -121,9 +123,166 @@ describe('findDuplicates (within one invoice)', () => {
       vin8s: ['AAAA1111'],
     });
   });
+  test('ignores no-show rows, which may repeat any identifier', () => {
+    expect(findDuplicates([
+      line({ inspectionNumber: '100', vin8: 'AAAA1111' }),
+      line({ type: 'noshow', inspectionNumber: '100', vin8: 'AAAA1111' }),
+      line({ type: 'noshow', inspectionNumber: '100', vin8: 'AAAA1111' }),
+    ])).toEqual({ inspectionNumbers: [], vin8s: [] });
+  });
   test('no duplicates returns empty arrays', () => {
     expect(findDuplicates([line({ inspectionNumber: '1', vin8: 'AAAA1111' })]))
       .toEqual({ inspectionNumbers: [], vin8s: [] });
+  });
+});
+
+describe('completed-only VIN / inspection # uniqueness', () => {
+  function identifierBlockers(lines: LineItem[], billed: BilledIdentifiers = NO_HISTORY) {
+    return invoiceFinalizeBlockers(draft(lines), billed)
+      .filter(({ field }) => field === 'vin8' || field === 'inspectionNumber')
+      .map(({ lineIndex, field, message }) => ({ lineIndex, field, message }));
+  }
+
+  test('blocks a VIN repeated on completed rows of the same invoice, independently of inspection #', () => {
+    expect(identifierBlockers([
+      line({ inspectionNumber: '100', vin8: 'AAAA1111' }),
+      line({ inspectionNumber: '200', vin8: 'AAAA1111' }),
+    ])).toEqual([
+      { lineIndex: 0, field: 'vin8', message: 'VIN AAAA1111 is on more than one completed row.' },
+      { lineIndex: 1, field: 'vin8', message: 'VIN AAAA1111 is on more than one completed row.' },
+    ]);
+  });
+
+  test('blocks an inspection # repeated on completed rows of the same invoice, independently of VIN', () => {
+    expect(identifierBlockers([
+      line({ inspectionNumber: '100', vin8: 'AAAA1111' }),
+      line({ inspectionNumber: '100', vin8: 'BBBB2222' }),
+    ])).toEqual([
+      { lineIndex: 0, field: 'inspectionNumber', message: 'Inspection #100 is on more than one completed row.' },
+      { lineIndex: 1, field: 'inspectionNumber', message: 'Inspection #100 is on more than one completed row.' },
+    ]);
+  });
+
+  test('blocks completed identifiers already billed on an active invoice from any year', () => {
+    expect(identifierBlockers(
+      [line({ inspectionNumber: '100', vin8: 'AAAA1111' })],
+      { vins: { AAAA1111: '4-2025' }, inspections: { 100: '9-2026' } },
+    )).toEqual([
+      { lineIndex: 0, field: 'inspectionNumber', message: 'Inspection #100 was already billed on invoice #9-2026.' },
+      { lineIndex: 0, field: 'vin8', message: 'VIN AAAA1111 was already billed on invoice #4-2025.' },
+    ]);
+  });
+
+  test('keeps original full-row indices when no-shows are interleaved with completed rows', () => {
+    expect(identifierBlockers([
+      line({ type: 'noshow', inspectionNumber: '1', vin8: 'SHARED01' }),
+      line({ inspectionNumber: '2', vin8: 'SHARED01' }),
+      line({ type: 'noshow', inspectionNumber: '3', vin8: 'SHARED01' }),
+      line({ inspectionNumber: '4', vin8: 'SHARED01' }),
+    ]).map(({ lineIndex, field }) => ({ lineIndex, field }))).toEqual([
+      { lineIndex: 1, field: 'vin8' },
+      { lineIndex: 3, field: 'vin8' },
+    ]);
+  });
+
+  test('never reserves or blocks no-show identifiers', () => {
+    const billed = { vins: { SHARED01: '1-2026' }, inspections: { 555: '1-2026' } };
+    // Repeated no-shows, a no-show sharing a completed row's identifiers, and no-shows
+    // whose identifiers are already billed are all allowed: a no-show gets rescheduled.
+    expect(identifierBlockers([
+      line({ type: 'noshow', inspectionNumber: '555', vin8: 'SHARED01' }),
+      line({ type: 'noshow', inspectionNumber: '555', vin8: 'SHARED01' }),
+      line({ type: 'noshow', inspectionNumber: '777', vin8: 'OTHER777' }),
+      line({ inspectionNumber: '777', vin8: 'OTHER777' }),
+    ], billed)).toEqual([]);
+  });
+
+  test('blocks only the completed rows when no-shows share a duplicated completed identifier', () => {
+    expect(identifierBlockers([
+      line({ inspectionNumber: '1', vin8: 'DUPVIN01' }),
+      line({ type: 'noshow', inspectionNumber: '2', vin8: 'DUPVIN01' }),
+      line({ inspectionNumber: '3', vin8: 'DUPVIN01' }),
+    ]).map(({ lineIndex }) => lineIndex)).toEqual([0, 2]);
+  });
+
+  test('keeps required-field blockers and orders them before identifier blockers on the same row', () => {
+    const blockers = invoiceFinalizeBlockers(draft([
+      line({ clientName: '', inspectionNumber: '100', vin8: 'AAAA1111' }),
+      line({ inspectionNumber: '200', vin8: 'AAAA1111' }),
+    ]), NO_HISTORY);
+    expect(blockers.map(({ lineIndex, field }) => ({ lineIndex, field }))).toEqual([
+      { lineIndex: 0, field: 'client' },
+      { lineIndex: 0, field: 'vin8' },
+      { lineIndex: 1, field: 'vin8' },
+    ]);
+  });
+
+  test('does not treat inherited object keys as billed identifiers', () => {
+    expect(identifierBlockers([
+      line({ inspectionNumber: 'constructor', vin8: '__proto__' }),
+      line({ inspectionNumber: 'toString', vin8: 'hasOwnProperty' }),
+    ])).toEqual([]);
+  });
+
+  test('matches prototype-named identifiers that really were billed', () => {
+    const billed: BilledIdentifiers = { vins: Object.create(null), inspections: Object.create(null) };
+    billed.vins['__proto__'] = '2-2026';
+    billed.inspections['constructor'] = '3-2026';
+    expect(identifierBlockers([line({ inspectionNumber: 'constructor', vin8: '__proto__' })], billed))
+      .toEqual([
+        { lineIndex: 0, field: 'inspectionNumber', message: 'Inspection #constructor was already billed on invoice #3-2026.' },
+        { lineIndex: 0, field: 'vin8', message: 'VIN __proto__ was already billed on invoice #2-2026.' },
+      ]);
+  });
+
+  test('uses exact stored strings, leaving inspection # case, zeros and spacing as entered', () => {
+    expect(identifierBlockers([
+      line({ inspectionNumber: 'a-100', vin8: 'AAAA1111' }),
+      line({ inspectionNumber: 'A-100', vin8: 'AAAA2222' }),
+      line({ inspectionNumber: '0100', vin8: 'AAAA3333' }),
+      line({ inspectionNumber: '100', vin8: 'AAAA4444' }),
+      line({ inspectionNumber: '100 ', vin8: 'AAAA5555' }),
+    ])).toEqual([]);
+  });
+});
+
+describe('invoiceRowWarnings', () => {
+  const context = {
+    dupInspections: new Set(['100']),
+    dupVins: new Set(['AAAA1111']),
+    billed: { vins: { AAAA1111: '4-2025' }, inspections: { 100: '9-2026' } },
+    periodStart: '2026-07-13',
+    periodEnd: '2026-07-19',
+  };
+
+  test('explains completed-row identifier conflicts', () => {
+    expect(invoiceRowWarnings(line({ inspectionNumber: '100', vin8: 'AAAA1111', date: '2026-07-14' }), context))
+      .toEqual([
+        'Inspection #100 is on more than one completed row',
+        'VIN AAAA1111 is on more than one completed row',
+        'Inspection #100 was already billed on invoice #9-2026',
+        'VIN AAAA1111 was already billed on invoice #4-2025',
+      ]);
+  });
+
+  test('gives no-show rows no identifier warnings but keeps VIN-format and period notes', () => {
+    expect(invoiceRowWarnings(line({
+      type: 'noshow', inspectionNumber: '100', vin8: 'AAAA1111', date: '2026-07-14',
+    }), context)).toEqual([]);
+    expect(invoiceRowWarnings(line({
+      type: 'noshow', inspectionNumber: '100', vin8: 'SHORT1', date: '2026-07-30',
+    }), context)).toEqual([
+      'VIN should be 8 characters — has 6',
+      'Date is outside the billing period',
+    ]);
+  });
+
+  test('does not warn for inherited object keys', () => {
+    for (const inspectionNumber of ['constructor', 'toString', '__proto__']) {
+      expect(invoiceRowWarnings(line({
+        inspectionNumber, vin8: 'VALIDVN1', date: '2026-07-14',
+      }), { ...context, billed: NO_HISTORY })).toEqual([]);
+    }
   });
 });
 

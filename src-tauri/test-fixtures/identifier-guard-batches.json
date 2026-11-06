@@ -1,0 +1,350 @@
+{
+  "ids": {
+    "cancelled": 1,
+    "completedA": 2,
+    "completedB": 3,
+    "inspectionC": 4,
+    "noShow": 5
+  },
+  "seed": [
+    {
+      "sql": "INSERT INTO invoices (id, year, seq, status, issue_date, period_start, period_end, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json, draft_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "params": [
+        1,
+        2026,
+        1,
+        "void",
+        "2026-04-06",
+        "2026-04-06",
+        "2026-04-06",
+        "2026-04-06",
+        3800,
+        494,
+        4294,
+        "{\"invoiceNumber\":\"1-2026\",\"seq\":1,\"year\":2026,\"issueDate\":\"2026-04-06\",\"periodStart\":\"2026-04-06\",\"periodEnd\":\"2026-04-06\",\"inspectorName\":\"\",\"inspectorAddress\":\"\",\"inspectorNumber\":\"\",\"gstHstRegistrationNumber\":\"\",\"billToName\":\"\",\"billToAddress\":\"\",\"registered\":true,\"taxRateBp\":1300,\"paymentEmail\":\"\",\"footerNotes\":\"\",\"logoDataUrl\":\"\",\"lines\":[{\"type\":\"completed\",\"position\":0,\"inspectionNumber\":\"R-100\",\"clientId\":null,\"clientName\":\"Acme Lease Corp\",\"locationId\":null,\"location\":\"Maplewood\",\"date\":\"2026-04-06\",\"vin8\":\"RACEVIN1\",\"mileageCents\":0,\"mileageApproverId\":null,\"mileageApproverName\":\"\",\"mileageApprovalDate\":\"\",\"feeCents\":3800}],\"totals\":{\"completedSubtotalCents\":3800,\"noshowSubtotalCents\":0,\"subtotalCents\":3800,\"taxCents\":494,\"totalCents\":4294}}",
+        1
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "INSERT INTO invoices (id, year, seq, status, issue_date, period_start, period_end, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json, draft_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "params": [
+        2,
+        2026,
+        null,
+        "draft",
+        "2026-04-13",
+        "2026-04-13",
+        "2026-04-13",
+        null,
+        0,
+        0,
+        0,
+        null,
+        1
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "INSERT INTO invoices (id, year, seq, status, issue_date, period_start, period_end, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json, draft_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "params": [
+        3,
+        2027,
+        null,
+        "draft",
+        "2027-01-04",
+        "2027-01-04",
+        "2027-01-04",
+        null,
+        0,
+        0,
+        0,
+        null,
+        1
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "INSERT INTO invoices (id, year, seq, status, issue_date, period_start, period_end, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json, draft_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "params": [
+        4,
+        2026,
+        4,
+        "draft",
+        "2026-04-20",
+        "2026-04-20",
+        "2026-04-20",
+        null,
+        0,
+        0,
+        0,
+        null,
+        1
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "INSERT INTO invoices (id, year, seq, status, issue_date, period_start, period_end, finalized_at, subtotal_cents, tax_cents, total_cents, snapshot_json, draft_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "params": [
+        5,
+        2026,
+        5,
+        "draft",
+        "2026-04-27",
+        "2026-04-27",
+        "2026-04-27",
+        null,
+        0,
+        0,
+        0,
+        null,
+        1
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "INSERT INTO line_items (id, invoice_id, type, position, inspection_number, client_id, client_name, location_id, location, date, vin8, mileage_cents, fee_cents, mileage_approver_id, mileage_approver_name, mileage_approval_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "params": [
+        1,
+        1,
+        "completed",
+        0,
+        "R-100",
+        null,
+        "Acme Lease Corp",
+        null,
+        "Maplewood",
+        "2026-04-06",
+        "RACEVIN1",
+        0,
+        3800,
+        null,
+        "",
+        ""
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "INSERT INTO line_items (id, invoice_id, type, position, inspection_number, client_id, client_name, location_id, location, date, vin8, mileage_cents, fee_cents, mileage_approver_id, mileage_approver_name, mileage_approval_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "params": [
+        2,
+        2,
+        "completed",
+        0,
+        "R-200",
+        null,
+        "Acme Lease Corp",
+        null,
+        "Maplewood",
+        "2026-04-06",
+        "RACEVIN1",
+        0,
+        3800,
+        null,
+        "",
+        ""
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "INSERT INTO line_items (id, invoice_id, type, position, inspection_number, client_id, client_name, location_id, location, date, vin8, mileage_cents, fee_cents, mileage_approver_id, mileage_approver_name, mileage_approval_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "params": [
+        3,
+        3,
+        "completed",
+        0,
+        "R-300",
+        null,
+        "Acme Lease Corp",
+        null,
+        "Maplewood",
+        "2026-04-06",
+        "RACEVIN1",
+        0,
+        3800,
+        null,
+        "",
+        ""
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "INSERT INTO line_items (id, invoice_id, type, position, inspection_number, client_id, client_name, location_id, location, date, vin8, mileage_cents, fee_cents, mileage_approver_id, mileage_approver_name, mileage_approval_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "params": [
+        4,
+        4,
+        "completed",
+        0,
+        "R-100",
+        null,
+        "Acme Lease Corp",
+        null,
+        "Maplewood",
+        "2026-04-06",
+        "OTHERVN1",
+        0,
+        3800,
+        null,
+        "",
+        ""
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "INSERT INTO line_items (id, invoice_id, type, position, inspection_number, client_id, client_name, location_id, location, date, vin8, mileage_cents, fee_cents, mileage_approver_id, mileage_approver_name, mileage_approval_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "params": [
+        5,
+        5,
+        "noshow",
+        0,
+        "R-100",
+        null,
+        "Acme Lease Corp",
+        null,
+        "Maplewood",
+        "2026-04-06",
+        "RACEVIN1",
+        0,
+        2500,
+        null,
+        "",
+        ""
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "INSERT INTO year_counters (year, last_seq) VALUES (?, ?)",
+      "params": [
+        2026,
+        1
+      ],
+      "expectedRowsAffected": 1
+    }
+  ],
+  "finalizeA": [
+    {
+      "sql": "UPDATE year_counters SET last_seq = ?\n                  WHERE year = ? AND last_seq = ?",
+      "params": [
+        6,
+        2026,
+        1
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "UPDATE invoices SET\n                  seq = ?, year = ?, status = 'finalized', finalized_at = ?,\n                  subtotal_cents = ?, tax_cents = ?, total_cents = ?, snapshot_json = ?\n                WHERE id = ? AND status = 'draft' AND draft_revision = ?\n                  AND NOT EXISTS (\n                    SELECT 1 FROM invoices other\n                    WHERE other.year = ? AND other.seq = ? AND other.id != ?\n                  )\n                  AND NOT EXISTS (\n  SELECT 1\n    FROM line_items mine\n    JOIN line_items other\n      ON other.id != mine.id\n     AND other.type = 'completed'\n     AND ((mine.vin8 != '' AND other.vin8 = mine.vin8)\n       OR (mine.inspection_number != '' AND other.inspection_number = mine.inspection_number))\n    JOIN invoices owner ON owner.id = other.invoice_id\n   WHERE mine.invoice_id = ?\n     AND mine.type = 'completed'\n     AND (owner.status = 'finalized' OR owner.id = mine.invoice_id))",
+      "params": [
+        6,
+        2026,
+        "2026-04-13",
+        3800,
+        494,
+        4294,
+        "{\"invoiceNumber\":\"6-2026\",\"seq\":6,\"year\":2026,\"issueDate\":\"2026-04-13\",\"periodStart\":\"2026-04-13\",\"periodEnd\":\"2026-04-13\",\"inspectorName\":\"\",\"inspectorAddress\":\"\",\"inspectorNumber\":\"\",\"gstHstRegistrationNumber\":\"\",\"billToName\":\"\",\"billToAddress\":\"\",\"registered\":true,\"taxRateBp\":1300,\"paymentEmail\":\"\",\"footerNotes\":\"\",\"logoDataUrl\":\"\",\"lines\":[{\"type\":\"completed\",\"position\":0,\"inspectionNumber\":\"R-200\",\"clientId\":null,\"clientName\":\"Acme Lease Corp\",\"locationId\":null,\"location\":\"Maplewood\",\"date\":\"2026-04-06\",\"vin8\":\"RACEVIN1\",\"mileageCents\":0,\"mileageApproverId\":null,\"mileageApproverName\":\"\",\"mileageApprovalDate\":\"\",\"feeCents\":3800}],\"totals\":{\"completedSubtotalCents\":3800,\"noshowSubtotalCents\":0,\"subtotalCents\":3800,\"taxCents\":494,\"totalCents\":4294}}",
+        2,
+        1,
+        2026,
+        6,
+        2,
+        2
+      ],
+      "expectedRowsAffected": 1
+    }
+  ],
+  "finalizeB": [
+    {
+      "sql": "INSERT INTO year_counters (year, last_seq)\n                  SELECT ?, ?\n                  WHERE NOT EXISTS (SELECT 1 FROM year_counters WHERE year = ?)",
+      "params": [
+        2027,
+        1,
+        2027
+      ],
+      "expectedRowsAffected": 1
+    },
+    {
+      "sql": "UPDATE invoices SET\n                  seq = ?, year = ?, status = 'finalized', finalized_at = ?,\n                  subtotal_cents = ?, tax_cents = ?, total_cents = ?, snapshot_json = ?\n                WHERE id = ? AND status = 'draft' AND draft_revision = ?\n                  AND NOT EXISTS (\n                    SELECT 1 FROM invoices other\n                    WHERE other.year = ? AND other.seq = ? AND other.id != ?\n                  )\n                  AND NOT EXISTS (\n  SELECT 1\n    FROM line_items mine\n    JOIN line_items other\n      ON other.id != mine.id\n     AND other.type = 'completed'\n     AND ((mine.vin8 != '' AND other.vin8 = mine.vin8)\n       OR (mine.inspection_number != '' AND other.inspection_number = mine.inspection_number))\n    JOIN invoices owner ON owner.id = other.invoice_id\n   WHERE mine.invoice_id = ?\n     AND mine.type = 'completed'\n     AND (owner.status = 'finalized' OR owner.id = mine.invoice_id))",
+      "params": [
+        1,
+        2027,
+        "2027-01-04",
+        3800,
+        494,
+        4294,
+        "{\"invoiceNumber\":\"1-2027\",\"seq\":1,\"year\":2027,\"issueDate\":\"2027-01-04\",\"periodStart\":\"2027-01-04\",\"periodEnd\":\"2027-01-04\",\"inspectorName\":\"\",\"inspectorAddress\":\"\",\"inspectorNumber\":\"\",\"gstHstRegistrationNumber\":\"\",\"billToName\":\"\",\"billToAddress\":\"\",\"registered\":true,\"taxRateBp\":1300,\"paymentEmail\":\"\",\"footerNotes\":\"\",\"logoDataUrl\":\"\",\"lines\":[{\"type\":\"completed\",\"position\":0,\"inspectionNumber\":\"R-300\",\"clientId\":null,\"clientName\":\"Acme Lease Corp\",\"locationId\":null,\"location\":\"Maplewood\",\"date\":\"2026-04-06\",\"vin8\":\"RACEVIN1\",\"mileageCents\":0,\"mileageApproverId\":null,\"mileageApproverName\":\"\",\"mileageApprovalDate\":\"\",\"feeCents\":3800}],\"totals\":{\"completedSubtotalCents\":3800,\"noshowSubtotalCents\":0,\"subtotalCents\":3800,\"taxCents\":494,\"totalCents\":4294}}",
+        3,
+        1,
+        2027,
+        1,
+        3,
+        3
+      ],
+      "expectedRowsAffected": 1
+    }
+  ],
+  "finalizeC": [
+    {
+      "sql": "INSERT INTO year_counters (year, last_seq) VALUES (?, ?)\n              ON CONFLICT(year) DO UPDATE SET last_seq =\n                CASE WHEN last_seq < excluded.last_seq THEN excluded.last_seq ELSE last_seq END",
+      "params": [
+        2026,
+        4
+      ]
+    },
+    {
+      "sql": "UPDATE invoices SET\n                  seq = ?, year = ?, status = 'finalized', finalized_at = ?,\n                  subtotal_cents = ?, tax_cents = ?, total_cents = ?, snapshot_json = ?\n                WHERE id = ? AND status = 'draft' AND draft_revision = ?\n                  AND NOT EXISTS (\n                    SELECT 1 FROM invoices other\n                    WHERE other.year = ? AND other.seq = ? AND other.id != ?\n                  )\n                  AND NOT EXISTS (\n  SELECT 1\n    FROM line_items mine\n    JOIN line_items other\n      ON other.id != mine.id\n     AND other.type = 'completed'\n     AND ((mine.vin8 != '' AND other.vin8 = mine.vin8)\n       OR (mine.inspection_number != '' AND other.inspection_number = mine.inspection_number))\n    JOIN invoices owner ON owner.id = other.invoice_id\n   WHERE mine.invoice_id = ?\n     AND mine.type = 'completed'\n     AND (owner.status = 'finalized' OR owner.id = mine.invoice_id))",
+      "params": [
+        4,
+        2026,
+        "2026-04-20",
+        3800,
+        494,
+        4294,
+        "{\"invoiceNumber\":\"4-2026\",\"seq\":4,\"year\":2026,\"issueDate\":\"2026-04-20\",\"periodStart\":\"2026-04-20\",\"periodEnd\":\"2026-04-20\",\"inspectorName\":\"\",\"inspectorAddress\":\"\",\"inspectorNumber\":\"\",\"gstHstRegistrationNumber\":\"\",\"billToName\":\"\",\"billToAddress\":\"\",\"registered\":true,\"taxRateBp\":1300,\"paymentEmail\":\"\",\"footerNotes\":\"\",\"logoDataUrl\":\"\",\"lines\":[{\"type\":\"completed\",\"position\":0,\"inspectionNumber\":\"R-100\",\"clientId\":null,\"clientName\":\"Acme Lease Corp\",\"locationId\":null,\"location\":\"Maplewood\",\"date\":\"2026-04-06\",\"vin8\":\"OTHERVN1\",\"mileageCents\":0,\"mileageApproverId\":null,\"mileageApproverName\":\"\",\"mileageApprovalDate\":\"\",\"feeCents\":3800}],\"totals\":{\"completedSubtotalCents\":3800,\"noshowSubtotalCents\":0,\"subtotalCents\":3800,\"taxCents\":494,\"totalCents\":4294}}",
+        4,
+        1,
+        2026,
+        4,
+        4,
+        4
+      ],
+      "expectedRowsAffected": 1
+    }
+  ],
+  "finalizeNoShow": [
+    {
+      "sql": "INSERT INTO year_counters (year, last_seq) VALUES (?, ?)\n              ON CONFLICT(year) DO UPDATE SET last_seq =\n                CASE WHEN last_seq < excluded.last_seq THEN excluded.last_seq ELSE last_seq END",
+      "params": [
+        2026,
+        5
+      ]
+    },
+    {
+      "sql": "UPDATE invoices SET\n                  seq = ?, year = ?, status = 'finalized', finalized_at = ?,\n                  subtotal_cents = ?, tax_cents = ?, total_cents = ?, snapshot_json = ?\n                WHERE id = ? AND status = 'draft' AND draft_revision = ?\n                  AND NOT EXISTS (\n                    SELECT 1 FROM invoices other\n                    WHERE other.year = ? AND other.seq = ? AND other.id != ?\n                  )\n                  AND NOT EXISTS (\n  SELECT 1\n    FROM line_items mine\n    JOIN line_items other\n      ON other.id != mine.id\n     AND other.type = 'completed'\n     AND ((mine.vin8 != '' AND other.vin8 = mine.vin8)\n       OR (mine.inspection_number != '' AND other.inspection_number = mine.inspection_number))\n    JOIN invoices owner ON owner.id = other.invoice_id\n   WHERE mine.invoice_id = ?\n     AND mine.type = 'completed'\n     AND (owner.status = 'finalized' OR owner.id = mine.invoice_id))",
+      "params": [
+        5,
+        2026,
+        "2026-04-27",
+        2500,
+        325,
+        2825,
+        "{\"invoiceNumber\":\"5-2026\",\"seq\":5,\"year\":2026,\"issueDate\":\"2026-04-27\",\"periodStart\":\"2026-04-27\",\"periodEnd\":\"2026-04-27\",\"inspectorName\":\"\",\"inspectorAddress\":\"\",\"inspectorNumber\":\"\",\"gstHstRegistrationNumber\":\"\",\"billToName\":\"\",\"billToAddress\":\"\",\"registered\":true,\"taxRateBp\":1300,\"paymentEmail\":\"\",\"footerNotes\":\"\",\"logoDataUrl\":\"\",\"lines\":[{\"type\":\"noshow\",\"position\":0,\"inspectionNumber\":\"R-100\",\"clientId\":null,\"clientName\":\"Acme Lease Corp\",\"locationId\":null,\"location\":\"Maplewood\",\"date\":\"2026-04-06\",\"vin8\":\"RACEVIN1\",\"mileageCents\":0,\"mileageApproverId\":null,\"mileageApproverName\":\"\",\"mileageApprovalDate\":\"\",\"feeCents\":2500}],\"totals\":{\"completedSubtotalCents\":0,\"noshowSubtotalCents\":2500,\"subtotalCents\":2500,\"taxCents\":325,\"totalCents\":2825}}",
+        5,
+        1,
+        2026,
+        5,
+        5,
+        5
+      ],
+      "expectedRowsAffected": 1
+    }
+  ],
+  "restoreCancelled": [
+    {
+      "sql": "UPDATE invoices SET status = 'finalized'\n             WHERE id = ? AND status = 'void'\n               AND NOT EXISTS (\n  SELECT 1\n    FROM line_items mine\n    JOIN line_items other\n      ON other.id != mine.id\n     AND other.type = 'completed'\n     AND ((mine.vin8 != '' AND other.vin8 = mine.vin8)\n       OR (mine.inspection_number != '' AND other.inspection_number = mine.inspection_number))\n    JOIN invoices owner ON owner.id = other.invoice_id\n   WHERE mine.invoice_id = ?\n     AND mine.type = 'completed'\n     AND (owner.status = 'finalized' OR owner.id = mine.invoice_id))",
+      "params": [
+        1,
+        1
+      ],
+      "expectedRowsAffected": 1
+    }
+  ]
+}

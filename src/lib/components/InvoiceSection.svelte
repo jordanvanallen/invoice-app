@@ -5,7 +5,7 @@
   import { mileageApprovalText, hasCompleteMileageApproval } from '$lib/mileageApproval';
   import { canonicalInvoiceMoneyInput, invoiceMoneyInputTransition } from '$lib/ui/format';
   import type { ComboboxAddNewResult } from '$lib/ui/combobox';
-  import { formatIsoDate, normalizeVin8, isValidVin8, isValidIsoDate, isDateOutsidePeriod } from '$lib/validation';
+  import { formatIsoDate, normalizeVin8, isValidIsoDate, invoiceRowWarnings } from '$lib/validation';
   import type { CatalogEntry } from '$lib/db/catalog-repo';
   import { newRow, type EditorRow } from '$lib/ui/editorRow';
   import { tick } from 'svelte';
@@ -44,22 +44,21 @@
     dateDefault: string;
     periodStart: string;
     periodEnd: string;
+    /** Identifiers repeated across completed rows of this invoice. */
     dupInspections: Set<string>;
     dupVins: Set<string>;
-    /** vin8 / inspection# -> invoice number it was already billed on (finalized invoices) */
+    /** vin8 / inspection# -> invoice number a completed row was already billed on (finalized invoices) */
     billedVins?: Record<string, string>;
     billedInspections?: Record<string, string>;
   } = $props();
 
+  // Identifier notes apply to completed rows only; no-shows may repeat a VIN / inspection #.
   function rowWarnings(row: EditorRow): string[] {
-    const w: string[] = [];
-    if (row.inspectionNumber && dupInspections.has(row.inspectionNumber)) w.push(`Inspection #${row.inspectionNumber} is on more than one row`);
-    if (row.vin8 && dupVins.has(row.vin8)) w.push(`VIN ${row.vin8} is on more than one row`);
-    if (row.vin8 && !isValidVin8(row.vin8)) w.push(`VIN should be 8 characters — has ${row.vin8.length}`);
-    if (row.inspectionNumber && billedInspections[row.inspectionNumber]) w.push(`Inspection #${row.inspectionNumber} was already billed on invoice #${billedInspections[row.inspectionNumber]}`);
-    if (row.vin8 && billedVins[row.vin8]) w.push(`VIN ${row.vin8} was already billed on invoice #${billedVins[row.vin8]}`);
-    if (row.date && isDateOutsidePeriod(row.date, periodStart, periodEnd)) w.push('Date is outside the billing period');
-    return w;
+    return invoiceRowWarnings(row, {
+      dupInspections, dupVins,
+      billed: { vins: billedVins, inspections: billedInspections },
+      periodStart, periodEnd,
+    });
   }
 
   let undo = $state<{ row: EditorRow; index: number } | null>(null);

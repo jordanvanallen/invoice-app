@@ -13,6 +13,27 @@ export interface DuplicateReport {
   vin8s: string[];
 }
 
+/** The fields that identify one inspection: its row type and its exact stored identifiers. */
+export type IdentifiedLine = Pick<LineItem, 'type' | 'inspectionNumber' | 'vin8'>;
+
+/**
+ * VIN / inspection # -> the invoice number it was billed on, from COMPLETED rows of
+ * active (finalized) invoices only. No-shows never reserve an identifier: they get rescheduled.
+ */
+export interface BilledIdentifiers {
+  vins: Record<string, string>;
+  inspections: Record<string, string>;
+}
+
+/**
+ * Own-property lookup, so identifiers such as "constructor" never match an inherited
+ * Object member now that a match blocks Lock & Save.
+ */
+function billedInvoiceFor(record: Record<string, string>, identifier: string): string | undefined {
+  if (!identifier || !Object.prototype.hasOwnProperty.call(record, identifier)) return undefined;
+  return record[identifier];
+}
+
 function repeatedValues(values: string[]): string[] {
   const seen = new Set<string>();
   const dupes = new Set<string>();
@@ -24,10 +45,12 @@ function repeatedValues(values: string[]): string[] {
   return [...dupes];
 }
 
-export function findDuplicates(lines: LineItem[]): DuplicateReport {
+/** Exact identifiers repeated across COMPLETED rows. No-show rows may repeat any identifier. */
+export function findDuplicates(lines: readonly IdentifiedLine[]): DuplicateReport {
+  const completed = lines.filter((l) => l.type === 'completed');
   return {
-    inspectionNumbers: repeatedValues(lines.map((l) => l.inspectionNumber)),
-    vin8s: repeatedValues(lines.map((l) => l.vin8)),
+    inspectionNumbers: repeatedValues(completed.map((l) => l.inspectionNumber)),
+    vin8s: repeatedValues(completed.map((l) => l.vin8)),
   };
 }
 
@@ -102,7 +125,62 @@ function lineFinalizeBlockers(line: LineItem, lineIndex: number): LineFinalizeBl
   return blockers;
 }
 
-export function invoiceFinalizeBlockers(draft: DraftInvoice): InvoiceFinalizeBlocker[] {
+/**
+ * Per row of `lines` (same indices), the blockers for a completed row whose exact VIN or
+ * inspection # repeats on another completed row of this invoice or was billed before.
+ * Each identifier is checked independently; no-show rows never get identifier blockers.
+ */
+function completedIdentifierBlockers(
+  lines: readonly IdentifiedLine[],
+  billed: BilledIdentifiers,
+): LineFinalizeBlocker[][] {
+  const repeated = findDuplicates(lines);
+  const repeatedInspections = new Set(repeated.inspectionNumbers);
+  const repeatedVins = new Set(repeated.vin8s);
+  return lines.map((line, lineIndex) => {
+    const blockers: LineFinalizeBlocker[] = [];
+    if (line.type !== 'completed') return blockers;
+    const { inspectionNumber, vin8 } = line;
+    const inspectionBilledOn = billedInvoiceFor(billed.inspections, inspectionNumber);
+    const vinBilledOn = billedInvoiceFor(billed.vins, vin8);
+    if (inspectionNumber && repeatedInspections.has(inspectionNumber)) {
+      blockers.push({
+        lineIndex, field: 'inspectionNumber',
+        message: `Inspection #${inspectionNumber} is on more than one completed row.`,
+      });
+    }
+    if (inspectionBilledOn) {
+      blockers.push({
+        lineIndex, field: 'inspectionNumber',
+        message: `Inspection #${inspectionNumber} was already billed on invoice #${inspectionBilledOn}.`,
+      });
+    }
+    if (vin8 && repeatedVins.has(vin8)) {
+      blockers.push({ lineIndex, field: 'vin8', message: `VIN ${vin8} is on more than one completed row.` });
+    }
+    if (vinBilledOn) {
+      blockers.push({ lineIndex, field: 'vin8', message: `VIN ${vin8} was already billed on invoice #${vinBilledOn}.` });
+    }
+    return blockers;
+  });
+}
+
+/** The first reason a set of rows can't become active without billing an inspection twice. */
+export function completedIdentifierConflict(
+  lines: readonly IdentifiedLine[],
+  billed: BilledIdentifiers,
+): string | null {
+  return completedIdentifierBlockers(lines, billed).flat()[0]?.message ?? null;
+}
+
+/**
+ * Everything that stops Lock & Save, in display order. `billed` must come from finalized
+ * invoices; line indices always refer to `draft.lines`, including no-show rows.
+ */
+export function invoiceFinalizeBlockers(
+  draft: DraftInvoice,
+  billed: BilledIdentifiers,
+): InvoiceFinalizeBlocker[] {
   const headerBlockers: InvoiceFinalizeBlocker[] = isValidIsoDate(draft.issueDate)
     ? []
     : [{ lineIndex: null, field: 'issueDate', message: 'Choose a valid invoice date.' }];
@@ -112,7 +190,39 @@ export function invoiceFinalizeBlockers(draft: DraftInvoice): InvoiceFinalizeBlo
       { lineIndex: null, field: 'invoice', message: 'Add at least one invoice row.' },
     ];
   }
-  return [...headerBlockers, ...draft.lines.flatMap(lineFinalizeBlockers)];
+  const identifierBlockers = completedIdentifierBlockers(draft.lines, billed);
+  return [
+    ...headerBlockers,
+    ...draft.lines.flatMap((line, i) => [...lineFinalizeBlockers(line, i), ...identifierBlockers[i]]),
+  ];
+}
+
+export interface InvoiceRowWarningContext {
+  /** Identifiers repeated across completed rows (from `findDuplicates`). */
+  dupInspections: ReadonlySet<string>;
+  dupVins: ReadonlySet<string>;
+  billed: BilledIdentifiers;
+  periodStart: string;
+  periodEnd: string;
+}
+
+/** Notes shown under an editor row. Identifier notes apply to completed rows only. */
+export function invoiceRowWarnings(row: LineItem, context: InvoiceRowWarningContext): string[] {
+  const w: string[] = [];
+  const isCompleted = row.type === 'completed';
+  const inspectionBilledOn = isCompleted ? billedInvoiceFor(context.billed.inspections, row.inspectionNumber) : undefined;
+  const vinBilledOn = isCompleted ? billedInvoiceFor(context.billed.vins, row.vin8) : undefined;
+  if (isCompleted && row.inspectionNumber && context.dupInspections.has(row.inspectionNumber)) {
+    w.push(`Inspection #${row.inspectionNumber} is on more than one completed row`);
+  }
+  if (isCompleted && row.vin8 && context.dupVins.has(row.vin8)) w.push(`VIN ${row.vin8} is on more than one completed row`);
+  if (row.vin8 && !isValidVin8(row.vin8)) w.push(`VIN should be 8 characters — has ${row.vin8.length}`);
+  if (inspectionBilledOn) w.push(`Inspection #${row.inspectionNumber} was already billed on invoice #${inspectionBilledOn}`);
+  if (vinBilledOn) w.push(`VIN ${row.vin8} was already billed on invoice #${vinBilledOn}`);
+  if (row.date && isDateOutsidePeriod(row.date, context.periodStart, context.periodEnd)) {
+    w.push('Date is outside the billing period');
+  }
+  return w;
 }
 
 const FINALIZE_FIELD_LABELS: Record<LineFinalizeField, string> = {
